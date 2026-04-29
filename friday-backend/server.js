@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { supabase } from './supabase.js';
 
 dotenv.config();
 
@@ -257,6 +258,143 @@ app.delete('/api/history/:id', (req, res) => {
     console.error('[DELETE /api/history/:id]', err.message);
     res.status(500).json({ error: 'Failed to delete history', detail: err.message });
   }
+});
+
+// ─── Local Agent Execution ────────────────────────────────────────────────────
+app.post('/api/execute-command', async (req, res) => {
+  try {
+    const { command } = req.body;
+    if (!command) return res.status(400).json({ success: false, message: 'No command provided' });
+
+    // Step 1: Clean the command using Groq
+    const groqResponse = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: 'You extract the explicit intent from the user command. Reply only with the cleaned command string (e.g. "open youtube", "shutdown", "volume up", "open vs code", "create note hello"). No conversational text.' },
+        { role: 'user', content: command }
+      ],
+      temperature: 0.1,
+      max_tokens: 50,
+    });
+    
+    const cleanedCommand = groqResponse.choices[0]?.message?.content?.trim().replace(/['"]/g, '');
+    
+    if (!cleanedCommand) {
+      return res.status(400).json({ success: false, message: 'Could not parse command intent.' });
+    }
+
+    // Step 2: Forward to local agent
+    const localAgentUrl = process.env.LOCAL_AGENT_URL || 'http://localhost:5001';
+    const agentRes = await fetch(`${localAgentUrl}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cleanedCommand })
+    });
+    
+    if (!agentRes.ok) {
+      return res.json({ success: false, message: "I can't control your device right now, the local agent is not responding properly." });
+    }
+
+    const agentData = await agentRes.json();
+    res.json(agentData);
+    
+  } catch (err) {
+    console.error('[/api/execute-command]', err.message);
+    res.json({ success: false, message: "I can't control your device right now, the local agent is not running" });
+  }
+});
+
+// ─── Supabase Routes ──────────────────────────────────────────────────────────
+
+// 1. Conversations
+app.post('/api/conversations', async (req, res) => {
+  const { user_message, friday_reply } = req.body;
+  const { data, error } = await supabase.from('conversations').insert([{ user_message, friday_reply }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.get('/api/conversations', async (req, res) => {
+  const { data, error } = await supabase.from('conversations').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 2. Tasks
+app.post('/api/tasks', async (req, res) => {
+  const { title, description, due_date } = req.body;
+  const { data, error } = await supabase.from('tasks').insert([{ title, description, due_date, status: 'pending' }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.get('/api/tasks', async (req, res) => {
+  const { data, error } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.patch('/api/tasks/:id', async (req, res) => {
+  const { status } = req.body;
+  const { data, error } = await supabase.from('tasks').update({ status }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.delete('/api/tasks/:id', async (req, res) => {
+  const { data, error } = await supabase.from('tasks').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 3. Notes
+app.post('/api/notes', async (req, res) => {
+  const { title, content } = req.body;
+  const { data, error } = await supabase.from('notes').insert([{ title, content }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.get('/api/notes', async (req, res) => {
+  const { data, error } = await supabase.from('notes').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.delete('/api/notes/:id', async (req, res) => {
+  const { data, error } = await supabase.from('notes').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 4. Reminders
+app.post('/api/reminders', async (req, res) => {
+  const { message, remind_at } = req.body;
+  const { data, error } = await supabase.from('reminders').insert([{ message, remind_at, is_sent: false }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.get('/api/reminders', async (req, res) => {
+  const { data, error } = await supabase.from('reminders').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.delete('/api/reminders/:id', async (req, res) => {
+  const { data, error } = await supabase.from('reminders').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 5. Memory
+app.post('/api/memory', async (req, res) => {
+  const { key, value } = req.body;
+  const { data, error } = await supabase.from('memory').insert([{ key, value }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.get('/api/memory', async (req, res) => {
+  const { data, error } = await supabase.from('memory').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.delete('/api/memory/:id', async (req, res) => {
+  const { data, error } = await supabase.from('memory').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

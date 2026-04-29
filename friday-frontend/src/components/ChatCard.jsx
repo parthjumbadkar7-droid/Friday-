@@ -3,7 +3,7 @@ import { Send, Loader2 } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import VoiceButton from './VoiceButton';
 import ToolIndicator from './ToolIndicator';
-import { sendMessage, fetchWeather, fetchSearch } from '../utils/api';
+import { sendMessage, fetchWeather, fetchSearch, executeCommand } from '../utils/api';
 
 // Detect if message implies a tool call
 function detectToolIntent(text) {
@@ -17,6 +17,10 @@ function detectToolIntent(text) {
   }
   if (/(search|look up|find|what is|who is|define|meaning of|tell me about)/.test(lower)) {
     return { type: 'search', query: text };
+  }
+  // System commands
+  if (/^(open|shutdown|restart|sleep|volume|mute|lock screen|create note|take screenshot)/.test(lower)) {
+    return { type: 'system', command: text };
   }
   return null;
 }
@@ -88,13 +92,28 @@ export default function ChatCard({
         try {
           if (toolIntent.type === 'weather') {
             toolData = await fetchWeather(toolIntent.city);
-          } else {
+          } else if (toolIntent.type === 'search') {
             toolData = await fetchSearch(toolIntent.query);
+          } else if (toolIntent.type === 'system') {
+            toolData = await executeCommand(toolIntent.command);
           }
           setToolState({ type: toolIntent.type, status: 'done', data: toolData });
         } catch {
           setToolState(null);
         }
+      }
+
+      // If it's a system command, we just report the result back directly, no need for Groq to talk much
+      if (toolIntent && toolIntent.type === 'system') {
+        const reply = toolData && toolData.success 
+          ? `Done! ${toolData.message}` 
+          : (toolData?.message || "I can't control your device right now, the local agent is not running");
+        
+        const fridayMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
+        setMessages((prev) => [...prev, fridayMsg]);
+        speak(reply);
+        setLoading(false);
+        return;
       }
 
       // Build context for Groq — inject tool result if available

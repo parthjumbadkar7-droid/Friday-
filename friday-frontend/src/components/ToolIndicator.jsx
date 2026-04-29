@@ -1,4 +1,4 @@
-import { Cloud, Search, X } from 'lucide-react';
+import { Cloud, Search, Terminal } from 'lucide-react';
 
 export default function ToolIndicator({ toolState }) {
   if (!toolState) return null;
@@ -6,15 +6,16 @@ export default function ToolIndicator({ toolState }) {
   const { type, status, data } = toolState;
   const isWeather = type === 'weather';
   const isLoading = status === 'loading';
+  const isSystem = type === 'system';
 
   return (
     <div className="tool-indicator-wrap">
       {/* Status pill */}
       <div className={`tool-pill ${isLoading ? 'tool-pill-loading' : 'tool-pill-done'}`}>
-        {isWeather ? <Cloud size={12} className="inline mr-1" /> : <Search size={12} className="inline mr-1" />}
+        {isWeather ? <Cloud size={12} className="inline mr-1" /> : isSystem ? <Terminal size={12} className="inline mr-1" /> : <Search size={12} className="inline mr-1" />}
         {isLoading
-          ? isWeather ? 'Checking weather...' : 'Searching...'
-          : isWeather ? 'Weather result' : 'Search result'}
+          ? isWeather ? 'Checking weather...' : isSystem ? 'Executing command...' : 'Searching...'
+          : isWeather ? 'Weather result' : isSystem ? 'Command executed' : 'Search result'}
       </div>
 
       {/* Result card */}
@@ -26,6 +27,10 @@ export default function ToolIndicator({ toolState }) {
               <span className="tool-weather-temp">{data.temperature}{data.unit}</span>
               <span className="tool-weather-cond">{data.condition}</span>
               {data.humidity && <span className="tool-weather-extra">💧 {data.humidity}%  💨 {data.windspeed} km/h</span>}
+            </div>
+          ) : isSystem ? (
+            <div className="tool-system">
+              <p className="tool-system-answer text-gray-400">{data?.message || 'Command complete'}</p>
             </div>
           ) : (
             <div className="tool-search">

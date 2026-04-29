@@ -62,3 +62,13 @@ export async function deleteHistory(id) {
   if (!res.ok) throw new Error(`History delete error: ${res.status}`);
   return res.json();
 }
+
+export async function executeCommand(command) {
+  const res = await fetch(`${BASE}/execute-command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  });
+  if (!res.ok) throw new Error(`Execute command error: ${res.status}`);
+  return res.json(); // { success, message }
+}
