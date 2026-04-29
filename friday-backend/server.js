@@ -19,7 +19,7 @@ const HISTORY_FILE = path.join(__dirname, 'history.json');
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://friday-silk-alpha.vercel.app'],
+  origin: true,
   credentials: true
 }));
 app.use(express.json());
