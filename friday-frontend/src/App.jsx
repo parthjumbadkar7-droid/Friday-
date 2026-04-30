@@ -162,6 +162,11 @@ export default function App() {
     resetTimer();
   }, [resetTimer]);
 
+  const handleNewChat = useCallback(() => {
+    convIdRef.current = uuidv4();
+    setMessages([]);
+  }, []);
+
   // Load a history conversation into chat
   const handleHistoryLoad = useCallback((star) => {
     if (star.messages) {
@@ -230,6 +235,7 @@ export default function App() {
           onPromptClick={(text) => setExternalPrompt(text)}
           history={history}
           onHistoryClick={handleHistoryLoad}
+          onNewChat={handleNewChat}
         />
         <ChatCard
           messages={messages}
