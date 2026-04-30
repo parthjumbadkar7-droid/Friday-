@@ -122,7 +122,13 @@ export default function App() {
 
   // Load conversation history on mount
   useEffect(() => {
-    loadHistory();
+    loadHistory().then((data) => {
+      if (data && data.length > 0 && messages.length === 0) {
+        const lastConv = data[data.length - 1];
+        convIdRef.current = lastConv.id;
+        setMessages(lastConv.messages || []);
+      }
+    });
   }, [loadHistory]);
 
   // Auto-save conversation when ≥ 3 messages exchanged
@@ -174,16 +180,24 @@ export default function App() {
     else startListening();
   };
 
+  const handleEditMessage = useCallback((timestampId, newContent) => {
+    setMessages((prev) => {
+      return prev.map(m => (m.timestamp === timestampId ? { ...m, content: newContent } : m));
+    });
+  }, []);
+
   return (
     <div className="app-root">
       {/* 3D Particle Swarm Background (Water as Archive) */}
       <AuraSwarm />
       
       {/* Deep space animated background layered behind or merged */}
-      <SpaceBackground
-        historyConversations={history}
-        onHistoryClick={handleHistoryLoad}
-      />
+      <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none' }}>
+        <SpaceBackground
+          historyConversations={history}
+          onHistoryClick={handleHistoryLoad}
+        />
+      </div>
 
       {/* Nebula glow orb */}
       <Nebula isSpeaking={isSpeaking} />
@@ -228,6 +242,7 @@ export default function App() {
           setToolState={setToolState}
           externalPrompt={externalPrompt}
           clearExternalPrompt={() => setExternalPrompt(null)}
+          onEditMessage={handleEditMessage}
         />
       </main>
     </div>

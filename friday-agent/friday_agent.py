@@ -18,68 +18,68 @@ def execute_action(command):
         if cmd.startswith("open "):
             target = cmd[5:].strip()
             
-            # Apps first
-            if target in ["cs2", "counter strike"]:
-                os.startfile("steam://rungameid/730")
-                return True, "Opened Counter Strike 2"
-            elif target == "spotify":
-                subprocess.Popen("spotify") # Assumes in PATH or standard start
-                return True, "Opened Spotify"
-            elif target in ["vs code", "vscode", "code"]:
-                subprocess.Popen("code")
-                return True, "Opened VS Code"
-            elif target == "chrome":
-                subprocess.Popen("chrome")
-                return True, "Opened Chrome"
-            elif target == "discord":
-                # Assuming discord is typically installed in localappdata
-                discord_path = os.path.join(os.getenv('LOCALAPPDATA'), "Discord", "Update.exe")
-                subprocess.Popen(f'"{discord_path}" --processStart Discord.exe', shell=True)
-                return True, "Opened Discord"
-            elif target in ["file explorer", "explorer"]:
-                subprocess.Popen("explorer")
-                return True, "Opened File Explorer"
-            elif target == "notepad":
-                subprocess.Popen("notepad")
-                return True, "Opened Notepad"
-            elif target == "calculator":
-                subprocess.Popen("calc")
-                return True, "Opened Calculator"
-            elif target == "task manager":
-                subprocess.Popen("taskmgr")
-                return True, "Opened Task Manager"
-            
-            # File Explorer specific folders
-            elif target == "downloads":
-                os.startfile(os.path.join(os.path.expanduser('~'), 'Downloads'))
-                return True, "Opened Downloads"
-            elif target == "documents":
-                os.startfile(os.path.join(os.path.expanduser('~'), 'Documents'))
-                return True, "Opened Documents"
-            elif target == "desktop":
-                os.startfile(os.path.join(os.path.expanduser('~'), 'Desktop'))
-                return True, "Opened Desktop"
-            
-            # Websites
-            elif target == "youtube":
-                webbrowser.open("https://youtube.com")
-                return True, "Opened YouTube"
-            elif target == "github":
-                webbrowser.open("https://github.com")
-                return True, "Opened GitHub"
-            elif target == "google":
-                webbrowser.open("https://google.com")
-                return True, "Opened Google"
-            elif target == "netflix":
-                webbrowser.open("https://netflix.com")
-                return True, "Opened Netflix"
-            elif target == "spotify web":
-                webbrowser.open("https://open.spotify.com")
-                return True, "Opened Spotify Web"
-            else:
-                # Fallback to general website
-                webbrowser.open(f"https://{target.replace(' ', '')}.com")
-                return True, f"Trying to open {target}.com"
+            # Websites (always webbrowser)
+            if target in ["youtube", "github", "google", "netflix", "spotify web"]:
+                url = f"https://{target.replace(' ', '')}.com"
+                if target == "spotify web": url = "https://open.spotify.com"
+                webbrowser.open(url)
+                return True, f"Opened {target.title()}"
+                
+            # Apps
+            try:
+                if target in ["cs2", "counter strike"]:
+                    subprocess.run(['cmd', '/c', 'start', 'steam://rungameid/730'])
+                    return True, "Opened Counter Strike 2"
+                elif target == "spotify" or target == "spotify app":
+                    subprocess.run(['cmd', '/c', 'start', 'spotify:'])
+                    return True, "Opened Spotify"
+                elif target in ["vs code", "vscode", "code"]:
+                    subprocess.run(['cmd', '/c', 'start', 'code'])
+                    return True, "Opened VS Code"
+                elif target == "chrome":
+                    subprocess.run(['cmd', '/c', 'start', 'chrome'])
+                    return True, "Opened Chrome"
+                elif target == "discord":
+                    discord_path = os.path.join(os.getenv('LOCALAPPDATA'), "Discord", "Update.exe")
+                    if os.path.exists(discord_path):
+                        subprocess.Popen(f'"{discord_path}" --processStart Discord.exe', shell=True)
+                    else:
+                        subprocess.run(['cmd', '/c', 'start', 'discord'], shell=True)
+                    return True, "Opened Discord"
+                elif target in ["file explorer", "explorer"]:
+                    subprocess.Popen(['explorer.exe'])
+                    return True, "Opened File Explorer"
+                elif target == "notepad":
+                    subprocess.Popen(['notepad.exe'])
+                    return True, "Opened Notepad"
+                elif target == "calculator":
+                    subprocess.Popen(['calc.exe'])
+                    return True, "Opened Calculator"
+                elif target == "task manager":
+                    subprocess.Popen(['taskmgr.exe'])
+                    return True, "Opened Task Manager"
+                
+                # File Explorer specific folders
+                elif target == "downloads":
+                    os.startfile(os.path.join(os.path.expanduser('~'), 'Downloads'))
+                    return True, "Opened Downloads"
+                elif target == "documents":
+                    os.startfile(os.path.join(os.path.expanduser('~'), 'Documents'))
+                    return True, "Opened Documents"
+                elif target == "desktop":
+                    os.startfile(os.path.join(os.path.expanduser('~'), 'Desktop'))
+                    return True, "Opened Desktop"
+                
+                else:
+                    # Fallback for unrecognized apps using Windows smart start
+                    # Also checking if it could be a website
+                    if '.' in target:
+                        webbrowser.open(f"https://{target}")
+                    else:
+                        subprocess.run(['cmd', '/c', 'start', target], shell=True)
+                    return True, f"Trying to open {target}"
+            except Exception as e:
+                return False, f"Failed to launch {target}: {str(e)}"
 
         # --- SYSTEM CONTROLS ---
         elif cmd == "shutdown":

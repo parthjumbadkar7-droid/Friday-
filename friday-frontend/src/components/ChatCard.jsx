@@ -38,6 +38,7 @@ export default function ChatCard({
   setToolState,
   externalPrompt,
   clearExternalPrompt,
+  onEditMessage,
 }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -162,7 +163,7 @@ export default function ChatCard({
           </div>
         )}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} />
+          <MessageBubble key={i} message={msg} onEdit={onEditMessage} />
         ))}
 
         {/* Tool indicator appears before FRIDAY's reply */}
