@@ -53,7 +53,7 @@ function useLiveStats() {
   return stats;
 }
 
-export default function LeftPanel({ onPromptClick, messageCount }) {
+export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick }) {
   const [note, setNote] = useState(() => localStorage.getItem('friday_note') || '');
   const [mood, setMood] = useState(null);
   const stats = useLiveStats();
@@ -147,6 +147,27 @@ export default function LeftPanel({ onPromptClick, messageCount }) {
               {p.text}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* ── History List ── */}
+      <div className="panel-card">
+        <div className="panel-card-title">Recent Conversations</div>
+        <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+          {history && history.length > 0 ? (
+            history.slice().reverse().slice(0, 5).map((conv) => (
+              <button
+                key={conv.id}
+                className="text-left text-sm text-gray-300 hover:text-white hover:bg-white/5 p-2 rounded transition-colors whitespace-nowrap overflow-hidden overflow-ellipsis"
+                onClick={() => onHistoryClick(conv)}
+                title={conv.title}
+              >
+                {conv.title}
+              </button>
+            ))
+          ) : (
+            <div className="text-sm text-gray-500">No recent chats</div>
+          )}
         </div>
       </div>
 

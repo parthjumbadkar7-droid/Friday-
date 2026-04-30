@@ -51,11 +51,11 @@ export default function MessageBubble({ message, onEdit }) {
         ) : (
           <div className="relative">
             <p className="msg-text whitespace-pre-wrap">{message.content}</p>
-            {!isUser && (
+            {isUser && (
               <button 
                 onClick={() => setIsEditing(true)}
-                className="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-purple-400 transition-all"
-                title="Edit response"
+                className="absolute -left-8 top-0 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-purple-400 transition-all"
+                title="Edit message"
               >
                 <Pencil size={12} />
               </button>

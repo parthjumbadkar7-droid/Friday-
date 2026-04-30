@@ -228,6 +228,8 @@ export default function App() {
         <LeftPanel
           messageCount={messages.length}
           onPromptClick={(text) => setExternalPrompt(text)}
+          history={history}
+          onHistoryClick={handleHistoryLoad}
         />
         <ChatCard
           messages={messages}

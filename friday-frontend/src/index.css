@@ -61,12 +61,12 @@ html, body, #root {
   background: radial-gradient(circle, #c084fc 0%, #7c3aed 60%, transparent 100%);
   box-shadow: 0 0 8px 3px rgba(168, 85, 247, 0.6);
   cursor: pointer;
-  pointer-events: all;
+  pointer-events: auto;
   animation: history-pulse 2.5s ease-in-out infinite;
   transition: transform 0.2s;
 }
 .history-star-dot:hover { transform: scale(1.8); }
-.group:hover .history-tooltip { opacity: 1; pointer-events: all; transform: translateY(0); }
+.group:hover .history-tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); }
 
 .history-tooltip {
   position: absolute;
