@@ -8,6 +8,7 @@ import LeftPanel from './components/LeftPanel';
 import { useVoice } from './hooks/useVoice';
 import { useProactive } from './hooks/useProactive';
 import { useHistory } from './hooks/useHistory';
+import { checkAgentStatus } from './utils/api';
 import { v4 as uuidv4 } from 'uuid';
 
 const USER_PROFILE = {
@@ -48,6 +49,7 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [toolState, setToolState] = useState(null);
   const [externalPrompt, setExternalPrompt] = useState(null);
+  const [agentOnline, setAgentOnline] = useState(false);
   const convIdRef = useRef(uuidv4());
 
   const { history, loaded, loadHistory, saveConversation, removeConversation } = useHistory();
@@ -120,16 +122,45 @@ export default function App() {
     [voiceEnabled, selectedVoice]
   );
 
-  // Load conversation history on mount
+  // Poll local agent status
   useEffect(() => {
-    loadHistory().then((data) => {
-      if (data && data.length > 0 && messages.length === 0) {
-        const lastConv = data[data.length - 1];
-        convIdRef.current = lastConv.id;
-        setMessages(lastConv.messages || []);
+    const check = async () => {
+      const status = await checkAgentStatus();
+      setAgentOnline(status.online);
+    };
+    check();
+    const id = setInterval(check, 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Load conversation history on mount with retry
+  useEffect(() => {
+    let attempts = 0;
+    const fetchWithRetry = async () => {
+      try {
+        const data = await loadHistory();
+        if (data && data.length > 0 && messages.length === 0) {
+          const lastConv = data[data.length - 1];
+          convIdRef.current = lastConv.id;
+          setMessages(lastConv.messages || []);
+        }
+        return true;
+      } catch (err) {
+        return false;
       }
-    });
-  }, [loadHistory]);
+    };
+
+    fetchWithRetry();
+    const id = setInterval(() => {
+      attempts++;
+      if (attempts >= 5) clearInterval(id); // Stop after 5 retries
+      fetchWithRetry().then(success => {
+        if (success) clearInterval(id);
+      });
+    }, 5000);
+
+    return () => clearInterval(id);
+  }, [loadHistory, messages.length]);
 
 
 
@@ -235,6 +266,7 @@ export default function App() {
           onHistoryClick={handleHistoryLoad}
           onNewChat={handleNewChat}
           onDeleteHistory={removeConversation}
+          isOnline={agentOnline}
         />
         <ChatCard
           messages={messages}

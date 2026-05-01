@@ -72,3 +72,8 @@ export async function executeCommand(command) {
   if (!res.ok) throw new Error(`Execute command error: ${res.status}`);
   return res.json(); // { success, message }
 }
+export async function checkAgentStatus() {
+  const res = await fetch(`${BASE}/health/agent`);
+  if (!res.ok) return { online: false };
+  return res.json(); // { online: boolean }
+}

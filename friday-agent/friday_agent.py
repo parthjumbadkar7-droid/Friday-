@@ -81,25 +81,32 @@ def execute_action(command):
                     os.startfile('taskmgr.exe')
                     return True, "Opened Task Manager"
                 
-                # File Explorer specific folders
-                elif target == "downloads":
-                    os.startfile(os.path.join(os.path.expanduser('~'), 'Downloads'))
-                    return True, "Opened Downloads"
-                elif target == "documents":
-                    os.startfile(os.path.join(os.path.expanduser('~'), 'Documents'))
-                    return True, "Opened Documents"
-                elif target == "desktop":
-                    os.startfile(os.path.join(os.path.expanduser('~'), 'Desktop'))
-                    return True, "Opened Desktop"
-                
+                # --- UNIVERSAL OPEN FALLBACK ---
                 else:
-                    # Fallback for unrecognized apps using Windows smart start
-                    # Also checking if it could be a website
+                    # Try to open directly as a file or registered app
+                    try:
+                        os.startfile(target)
+                        return True, f"Opened {target}"
+                    except:
+                        # Try with .exe extension
+                        try:
+                            os.startfile(f"{target}.exe")
+                            return True, f"Opened {target}"
+                        except:
+                            # Try searching with 'where'
+                            try:
+                                result = subprocess.check_output(['where', target], text=True).split('\n')[0].strip()
+                                if result:
+                                    os.startfile(result)
+                                    return True, f"Opened {target}"
+                            except:
+                                pass
+                    
                     if '.' in target:
                         webbrowser.open(f"https://{target}")
-                    else:
-                        os.startfile(target)
-                    return True, f"Trying to open {target}"
+                        return True, f"Opened {target} in browser"
+                    
+                    return False, f"I couldn't find '{target}' on your system. Try giving me the full name or file extension."
             except Exception as e:
                 return False, f"Failed to launch {target}: {str(e)}"
 
@@ -166,10 +173,13 @@ def execute_action(command):
                 "task manager": "taskmgr.exe"
             }
             
-            pname = process_map.get(target, f"{target}.exe")
+            pname = process_map.get(target.lower(), f"{target}.exe")
             try:
+                # Try killing by process name
                 subprocess.run(['taskkill', '/F', '/IM', pname], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                return True, f"Closed {target.title()}"
+                # Also try killing by window title wildcard (very effective for files/folders)
+                subprocess.run(['taskkill', '/F', '/FI', f"WINDOWTITLE eq {target}*"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                return True, f"Closed {target}"
             except Exception as e:
                 return False, f"Failed to close {target}: {str(e)}"
                 

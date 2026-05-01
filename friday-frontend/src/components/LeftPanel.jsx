@@ -54,7 +54,7 @@ function useLiveStats() {
   return stats;
 }
 
-export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick, onNewChat, onDeleteHistory }) {
+export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick, onNewChat, onDeleteHistory, isOnline }) {
   const [note, setNote] = useState(() => localStorage.getItem('friday_note') || '');
   const [mood, setMood] = useState(null);
   const stats = useLiveStats();
@@ -81,8 +81,8 @@ export default function LeftPanel({ onPromptClick, messageCount, history, onHist
             <div className="profile-name">Parth</div>
             <div className="profile-role">Hardware Eng. Student · Amravati</div>
             <div className="profile-status">
-              <span className="status-dot" />
-              <span className="status-text">FRIDAY is online</span>
+              <span className={`status-dot ${isOnline ? 'status-online' : 'status-offline'}`} />
+              <span className="status-text">{isOnline ? 'FRIDAY is online' : 'Agent offline'}</span>
             </div>
           </div>
         </div>

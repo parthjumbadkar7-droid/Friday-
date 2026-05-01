@@ -99,25 +99,67 @@ def update_render_url(url):
     except Exception as e:
         print(f"Error: {e}")
 
+def register_agent_direct(url):
+    print(f"Directly registering agent at: {url}")
+    # We try both localhost and public Render URL
+    targets = ['http://localhost:3001/api/register-agent']
+    # If we have a custom Vercel/Render URL for the backend, we should add it here
+    # For now, let's assume the user might have VITE_API_URL or similar
+    
+    for target in targets:
+        try:
+            res = requests.post(target, json={'url': url}, timeout=5)
+            if res.status_code == 200:
+                print(f"✓ Agent registered with backend at {target}")
+        except:
+            pass
+
+def check_internet():
+    try:
+        requests.get('https://google.com', timeout=5)
+        return True
+    except:
+        return False
+
 def start_tunnel():
     global tunnel_process
-    print("Starting Cloudflare tunnel...")
-    tunnel_process = subprocess.Popen(
-        ['cloudflared', 'tunnel', '--url', 'http://localhost:5001'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
+    print("Starting Cloudflare tunnel loop...")
     
-    url_found = False
-    for line in tunnel_process.stdout:
-        print(line.strip())
-        if not url_found:
-            match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
-            if match:
-                tunnel_url = match.group(0)
-                url_found = True
-                update_render_url(tunnel_url)
+    while True:
+        if not check_internet():
+            print("No internet detected. Waiting 10 seconds before retry...")
+            time.sleep(10)
+            continue
+
+        print("\nConnecting Cloudflare tunnel...")
+        tunnel_process = subprocess.Popen(
+            ['cloudflared', 'tunnel', '--url', 'http://localhost:5001'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        
+        url_found = False
+        try:
+            for line in tunnel_process.stdout:
+                print(line.strip())
+                if not url_found:
+                    match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+                    if match:
+                        tunnel_url = match.group(0)
+                        url_found = True
+                        print(f"\n✨ TUNNEL ONLINE: {tunnel_url}")
+                        update_render_url(tunnel_url)
+                        register_agent_direct(tunnel_url)
+            
+            # If loop finishes, process died
+            print("Tunnel process disconnected. Restarting...")
+        except Exception as e:
+            print(f"Tunnel error: {e}")
+        
+        if tunnel_process:
+            tunnel_process.terminate()
+        time.sleep(5)
 
 def shutdown(sig=None, frame=None):
     print("\nShutting down Friday...")
