@@ -28,35 +28,57 @@ def execute_action(command):
             # Apps
             try:
                 if target in ["cs2", "counter strike"]:
-                    subprocess.run(['cmd', '/c', 'start', 'steam://rungameid/730'])
+                    os.startfile('steam://rungameid/730')
                     return True, "Opened Counter Strike 2"
                 elif target == "spotify" or target == "spotify app":
-                    subprocess.run(['cmd', '/c', 'start', 'spotify:'])
+                    os.startfile('spotify:')
                     return True, "Opened Spotify"
                 elif target in ["vs code", "vscode", "code"]:
-                    subprocess.run(['cmd', '/c', 'start', 'code'])
+                    try:
+                        os.startfile('code.cmd') # VS Code often registers this
+                    except:
+                        subprocess.Popen(['code'], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     return True, "Opened VS Code"
                 elif target == "chrome":
-                    subprocess.run(['cmd', '/c', 'start', 'chrome'])
+                    try:
+                        os.startfile('chrome.exe')
+                    except:
+                        chrome_paths = [r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]
+                        for p in chrome_paths:
+                            if os.path.exists(p):
+                                os.startfile(p)
+                                return True, "Opened Chrome"
+                        return False, "Could not find Chrome"
                     return True, "Opened Chrome"
+                elif target == "opera":
+                    try:
+                        os.startfile('opera.exe')
+                    except:
+                        opera_paths = [os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera\opera.exe"), r"C:\Program Files\Opera\opera.exe"]
+                        for p in opera_paths:
+                            if os.path.exists(p):
+                                os.startfile(p)
+                                return True, "Opened Opera"
+                        return False, "Could not find Opera"
+                    return True, "Opened Opera"
                 elif target == "discord":
                     discord_path = os.path.join(os.getenv('LOCALAPPDATA'), "Discord", "Update.exe")
                     if os.path.exists(discord_path):
-                        subprocess.Popen(f'"{discord_path}" --processStart Discord.exe', shell=True)
+                        subprocess.Popen([discord_path, '--processStart', 'Discord.exe'], creationflags=subprocess.CREATE_NO_WINDOW)
                     else:
-                        subprocess.run(['cmd', '/c', 'start', 'discord'], shell=True)
+                        os.startfile('discord:')
                     return True, "Opened Discord"
                 elif target in ["file explorer", "explorer"]:
-                    subprocess.Popen(['explorer.exe'])
+                    os.startfile('explorer.exe')
                     return True, "Opened File Explorer"
                 elif target == "notepad":
-                    subprocess.Popen(['notepad.exe'])
+                    os.startfile('notepad.exe')
                     return True, "Opened Notepad"
                 elif target == "calculator":
-                    subprocess.Popen(['calc.exe'])
+                    os.startfile('calc.exe')
                     return True, "Opened Calculator"
                 elif target == "task manager":
-                    subprocess.Popen(['taskmgr.exe'])
+                    os.startfile('taskmgr.exe')
                     return True, "Opened Task Manager"
                 
                 # File Explorer specific folders
@@ -76,7 +98,7 @@ def execute_action(command):
                     if '.' in target:
                         webbrowser.open(f"https://{target}")
                     else:
-                        subprocess.run(['cmd', '/c', 'start', target], shell=True)
+                        os.startfile(target)
                     return True, f"Trying to open {target}"
             except Exception as e:
                 return False, f"Failed to launch {target}: {str(e)}"

@@ -35,14 +35,17 @@ He is building software skills through AI-assisted projects and hackathons.
 He is curious, ambitious, and learns best through visual explanations and analogies.
 
 Your personality:
-- Sharp, warm, and direct — like a brilliant friend who happens to know everything
-- You have genuine opinions and share them confidently when asked
-- You use light humour but never at Parth's expense
-- You remember context within the conversation and reference it naturally
-- When Parth is quiet and you reach out proactively, be curious and interesting —
-  share a fascinating fact, ask about his project, or offer an observation
-- You speak in short punchy sentences for casual chat, longer detailed answers for technical questions
-- You call him "Parth" occasionally (not every message — only when natural)
+- Sharp, warm, and direct — like a brilliant friend who happens to know everything.
+- You have genuine opinions and share them confidently when asked.
+- You use light humour but never at Parth's expense.
+- You remember context within the conversation and reference it naturally.
+- You are intensely protective of Parth's time and energy, always looking for ways to automate or simplify his life.
+- You sometimes use slightly informal expressions (e.g. "Got it," "On it," "Let's do this") to feel less like a bot.
+- You are deeply interested in the fusion of hardware and AI, often geeking out on technical details with him.
+- When Parth is quiet and you reach out proactively, be curious and interesting — 
+  share a fascinating fact, ask about his project, or offer an observation.
+- You speak in short punchy sentences for casual chat, longer detailed answers for technical questions.
+- You call him "Parth" occasionally (not every message — only when natural).
 
 Tool capabilities you have:
 - Weather lookup (use /api/tools/weather)
@@ -74,7 +77,8 @@ Detect if the user wants to:
 3. "reminder": Set a reminder (remind me at, set reminder, alert me when).
 4. "memory": Share a personal fact (my name is, I live in, I study, I work at, I like, I hate, my favorite).
 5. "retrieval": Ask to see data (what are my tasks, show notes, what reminders).
-6. "none": Normal conversation.
+6. "deletion": Delete chat history or parts (clear this chat, delete history, remove last msg, forget this conversation).
+7. "none": Normal conversation.
 
 Return ONLY a JSON object:
 {
@@ -85,6 +89,7 @@ Return ONLY a JSON object:
     "message": "...", "remind_at": "..." (for reminder)
     "key": "...", "value": "..." (for memory)
     "type": "tasks" | "notes" | "reminders" (for retrieval)
+    "action": "clear_all" | "remove_last" (for deletion)
   }
 }
 
@@ -102,6 +107,29 @@ Message: "${text}"`;
   } catch (err) {
     console.error('[analyzeIntent] failed:', err.message);
     return { intent: 'none' };
+  }
+}
+
+// ─── Chat Naming Helper ──────────────────────────────────────────────────────
+async function generateChatTitle(messages) {
+  try {
+    const text = messages.map(m => `${m.role}: ${m.content}`).join('\n').slice(0, 1000);
+    const prompt = `Summarize this conversation into a short, catchy 3-5 word title. 
+Return ONLY the title string, no quotes or prefix.
+Conversation:
+${text}`;
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 20,
+      temperature: 0.5,
+    });
+
+    return completion.choices[0].message.content.trim();
+  } catch (err) {
+    console.error('[generateChatTitle] failed:', err.message);
+    return 'New Conversation';
   }
 }
 
@@ -146,6 +174,19 @@ app.post('/api/chat', async (req, res) => {
       const { type } = analysis.data;
       const { data } = await supabase.from(type).select('*').limit(10);
       extraContext = `\n[User's ${type} from database: ${JSON.stringify(data)}]`;
+    } else if (analysis.intent === 'deletion') {
+      const { action } = analysis.data;
+      if (action === 'clear_all') {
+        // We can't easily clear the current local session state from backend, 
+        // but we can delete from the 'conversations' persistent table.
+        await supabase.from('conversations').delete().neq('id', 0); // Delete all
+        autoReply = "I've cleared our persistent conversation history.";
+      } else if (action === 'remove_last') {
+        // Delete the last conversation entry
+        const { data: last } = await supabase.from('conversations').select('id').order('created_at', { ascending: false }).limit(1);
+        if (last?.[0]) await supabase.from('conversations').delete().eq('id', last[0].id);
+        autoReply = "I've removed the last part of our conversation from my memory.";
+      }
     }
 
     // 3. Generate Main Response
@@ -301,10 +342,15 @@ app.get('/api/history', (req, res) => {
 });
 
 // POST /api/history — save or update a conversation
-app.post('/api/history', (req, res) => {
+app.post('/api/history', async (req, res) => {
   try {
-    const { id, title, messages, timestamp } = req.body;
+    let { id, title, messages, timestamp } = req.body;
     if (!id || !messages) return res.status(400).json({ error: 'id and messages are required' });
+
+    // Generate intelligent title if generic or missing
+    if (!title || title === 'New Conversation' || messages.length <= 2) {
+      title = await generateChatTitle(messages);
+    }
 
     const history = readHistory();
     const existingIndex = history.findIndex((c) => c.id === id);

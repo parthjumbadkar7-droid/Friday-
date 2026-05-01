@@ -131,18 +131,7 @@ export default function App() {
     });
   }, [loadHistory]);
 
-  // Auto-save conversation when ≥ 3 messages exchanged
-  useEffect(() => {
-    if (messages.length >= 3) {
-      const conversation = {
-        id: convIdRef.current,
-        title: generateTitle(messages),
-        messages,
-        timestamp: new Date().toISOString(),
-      };
-      saveConversation(conversation);
-    }
-  }, [messages, saveConversation]);
+
 
   // Handle proactive message
   const handleProactive = useCallback((reply) => {
@@ -163,9 +152,18 @@ export default function App() {
   }, [resetTimer]);
 
   const handleNewChat = useCallback(() => {
+    if (messages.length >= 2) {
+      const conversation = {
+        id: convIdRef.current,
+        title: 'New Conversation', // Backend generates intelligent title
+        messages,
+        timestamp: new Date().toISOString(),
+      };
+      saveConversation(conversation);
+    }
     convIdRef.current = uuidv4();
     setMessages([]);
-  }, []);
+  }, [messages, saveConversation]);
 
   // Load a history conversation into chat
   const handleHistoryLoad = useCallback((star) => {
