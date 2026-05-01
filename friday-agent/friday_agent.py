@@ -150,6 +150,29 @@ def execute_action(command):
             screenshot.save(ss_path)
             return True, "Saved screenshot to Desktop"
             
+        elif cmd.startswith("close "):
+            target = cmd[6:].strip()
+            # Map common names to process names
+            process_map = {
+                "chrome": "chrome.exe",
+                "opera": "opera.exe",
+                "vs code": "code.exe",
+                "vscode": "code.exe",
+                "code": "code.exe",
+                "spotify": "Spotify.exe",
+                "discord": "Discord.exe",
+                "notepad": "notepad.exe",
+                "calculator": "calc.exe",
+                "task manager": "taskmgr.exe"
+            }
+            
+            pname = process_map.get(target, f"{target}.exe")
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', pname], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                return True, f"Closed {target.title()}"
+            except Exception as e:
+                return False, f"Failed to close {target}: {str(e)}"
+                
         return False, "Command not recognized"
         
     except Exception as e:

@@ -250,6 +250,7 @@ export default function App() {
           externalPrompt={externalPrompt}
           clearExternalPrompt={() => setExternalPrompt(null)}
           onEditMessage={handleEditMessage}
+          onNewChat={handleNewChat}
         />
       </main>
     </div>

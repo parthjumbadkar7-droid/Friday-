@@ -77,8 +77,10 @@ Detect if the user wants to:
 3. "reminder": Set a reminder (remind me at, set reminder, alert me when).
 4. "memory": Share a personal fact (my name is, I live in, I study, I work at, I like, I hate, my favorite).
 5. "retrieval": Ask to see data (what are my tasks, show notes, what reminders).
-6. "deletion": Delete chat history or parts (clear this chat, delete history, remove last msg, forget this conversation).
-7. "none": Normal conversation.
+6. "deletion": Delete chat history or parts (clear this chat, delete history, remove last msg).
+7. "control": System actions (open Chrome, close Opera, lock screen, mute volume).
+8. "session": Chat session actions (new chat, open new chat box, start over).
+9. "none": Normal conversation.
 
 Return ONLY a JSON object:
 {
@@ -90,6 +92,8 @@ Return ONLY a JSON object:
     "key": "...", "value": "..." (for memory)
     "type": "tasks" | "notes" | "reminders" (for retrieval)
     "action": "clear_all" | "remove_last" (for deletion)
+    "command": "open chrome" | "close opera" | "lock screen" etc. (for control)
+    "session_type": "new" | "clear_ui" (for session)
   }
 }
 
@@ -177,15 +181,26 @@ app.post('/api/chat', async (req, res) => {
     } else if (analysis.intent === 'deletion') {
       const { action } = analysis.data;
       if (action === 'clear_all') {
-        // We can't easily clear the current local session state from backend, 
-        // but we can delete from the 'conversations' persistent table.
-        await supabase.from('conversations').delete().neq('id', 0); // Delete all
+        await supabase.from('conversations').delete().neq('id', 0);
         autoReply = "I've cleared our persistent conversation history.";
       } else if (action === 'remove_last') {
-        // Delete the last conversation entry
         const { data: last } = await supabase.from('conversations').select('id').order('created_at', { ascending: false }).limit(1);
         if (last?.[0]) await supabase.from('conversations').delete().eq('id', last[0].id);
         autoReply = "I've removed the last part of our conversation from my memory.";
+      }
+    } else if (analysis.intent === 'control') {
+      const { command } = analysis.data;
+      // We return a special flag so frontend can call the local agent if it matches a tool intent
+      // But for "close" specifically, we can trigger it here if we want to call the local agent from backend
+      // Actually, it's better to let the frontend's tool detection handle it, 
+      // but I'll add a confirmation reply.
+      autoReply = `I'm on it. Executing: ${command}.`;
+    } else if (analysis.intent === 'session') {
+      const { session_type } = analysis.data;
+      if (session_type === 'new') {
+        autoReply = "Starting a fresh session for you. I've archived our previous talk.";
+      } else {
+        autoReply = "Clearing the chat box. Let's start fresh.";
       }
     }
 

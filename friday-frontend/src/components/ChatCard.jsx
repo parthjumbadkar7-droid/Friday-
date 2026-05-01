@@ -19,7 +19,7 @@ function detectToolIntent(text) {
     return { type: 'search', query: text };
   }
   // System commands
-  if (/^(open|shutdown|restart|sleep|volume|mute|lock screen|create note|take screenshot)/.test(lower)) {
+  if (/^(open|close|shutdown|restart|sleep|volume|mute|lock screen|create note|take screenshot)/.test(lower)) {
     return { type: 'system', command: text };
   }
   return null;
@@ -39,6 +39,7 @@ export default function ChatCard({
   externalPrompt,
   clearExternalPrompt,
   onEditMessage,
+  onNewChat,
 }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,6 +74,14 @@ export default function ChatCard({
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || loading) return;
+
+    // Session Management Detection
+    const lowerText = text.toLowerCase();
+    if (lowerText === 'new chat' || lowerText === 'open new chat box' || lowerText === 'start new session') {
+      onNewChat();
+      setInput('');
+      return;
+    }
 
     setInput('');
     onNewMessage(); // reset proactive timer
