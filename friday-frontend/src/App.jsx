@@ -236,6 +236,7 @@ export default function App() {
           history={history}
           onHistoryClick={handleHistoryLoad}
           onNewChat={handleNewChat}
+          onDeleteHistory={removeConversation}
         />
         <ChatCard
           messages={messages}

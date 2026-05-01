@@ -77,15 +77,35 @@ export default function ChatCard({
     setInput('');
     onNewMessage(); // reset proactive timer
 
-    const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    const updatedMessages = [...messages, userMsg];
+    const isRetry = text.toLowerCase() === 'try again';
+    let userMsg = null;
+    let updatedMessages = [...messages];
+
+    if (isRetry) {
+      // Find last user message to retry
+      const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+      if (lastUserIdx === -1) {
+        setMessages(prev => [...prev, { role: 'assistant', content: "I don't have a previous request to try again.", timestamp: new Date().toISOString() }]);
+        setLoading(false);
+        return;
+      }
+      const actualIdx = messages.length - 1 - lastUserIdx;
+      userMsg = messages[actualIdx];
+      updatedMessages = messages.slice(0, actualIdx + 1);
+    } else {
+      userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+      updatedMessages = [...messages, userMsg];
+    }
+
     setMessages(updatedMessages);
     setLoading(true);
     setToolState(null);
 
+    const queryText = userMsg.content;
+
     try {
       // Tool detection
-      const toolIntent = detectToolIntent(text);
+      const toolIntent = detectToolIntent(queryText);
       let toolData = null;
 
       if (toolIntent) {
@@ -125,7 +145,7 @@ export default function ChatCard({
           : `[Tool result — search for "${toolData.query}": ${toolData.answer || 'No direct answer.'} ${toolData.results?.map(r => r.text).slice(0, 2).join(' | ') || ''}]`;
         contextMessages = [
           ...contextMessages.slice(0, -1),
-          { role: 'user', content: `${text}\n\n${toolContext}` },
+          { role: 'user', content: `${queryText}\n\n${toolContext}` },
         ];
       }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Trash2 } from 'lucide-react';
 
 const TIPS = [
   "Neurons that fire together, wire together — that's why spaced repetition beats cramming by 2x.",
@@ -53,7 +54,7 @@ function useLiveStats() {
   return stats;
 }
 
-export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick, onNewChat }) {
+export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick, onNewChat, onDeleteHistory }) {
   const [note, setNote] = useState(() => localStorage.getItem('friday_note') || '');
   const [mood, setMood] = useState(null);
   const stats = useLiveStats();
@@ -164,14 +165,22 @@ export default function LeftPanel({ onPromptClick, messageCount, history, onHist
         <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
           {history && history.length > 0 ? (
             history.slice().reverse().slice(0, 5).map((conv) => (
-              <button
-                key={conv.id}
-                className="text-left text-sm text-gray-300 hover:text-white hover:bg-white/5 p-2 rounded transition-colors whitespace-nowrap overflow-hidden overflow-ellipsis"
-                onClick={() => onHistoryClick(conv)}
-                title={conv.title}
-              >
-                {conv.title}
-              </button>
+              <div key={conv.id} className="flex items-center group">
+                <button
+                  className="flex-1 text-left text-sm text-gray-300 hover:text-white hover:bg-white/5 p-2 rounded transition-colors whitespace-nowrap overflow-hidden overflow-ellipsis"
+                  onClick={() => onHistoryClick(conv)}
+                  title={conv.title}
+                >
+                  {conv.title}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeleteHistory(conv.id); }}
+                  className="opacity-0 group-hover:opacity-100 p-2 text-gray-500 hover:text-red-400 transition-all"
+                  title="Delete conversation"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))
           ) : (
             <div className="text-sm text-gray-500">No recent chats</div>
