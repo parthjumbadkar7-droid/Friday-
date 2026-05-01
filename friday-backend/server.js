@@ -64,36 +64,113 @@ function writeHistory(history) {
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf-8');
 }
 
+// ─── Intent Analysis Helper ──────────────────────────────────────────────────
+async function analyzeIntent(text) {
+  try {
+    const prompt = `Analyze this user message for FRIDAY personal assistant.
+Detect if the user wants to:
+1. "task": Save a task (remind me to, I need to, add task, don't forget).
+2. "note": Save a note (save this, remember that, note this down, keep this).
+3. "reminder": Set a reminder (remind me at, set reminder, alert me when).
+4. "memory": Share a personal fact (my name is, I live in, I study, I work at, I like, I hate, my favorite).
+5. "retrieval": Ask to see data (what are my tasks, show notes, what reminders).
+6. "none": Normal conversation.
+
+Return ONLY a JSON object:
+{
+  "intent": "task" | "note" | "reminder" | "memory" | "retrieval" | "none",
+  "data": {
+    "title": "...", "description": "...", "due_date": "..." (for task)
+    "title": "...", "content": "..." (for note)
+    "message": "...", "remind_at": "..." (for reminder)
+    "key": "...", "value": "..." (for memory)
+    "type": "tasks" | "notes" | "reminders" (for retrieval)
+  }
+}
+
+Message: "${text}"`;
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant", // fast model
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 150,
+      temperature: 0.1,
+      response_format: { type: "json_object" }
+    });
+
+    return JSON.parse(completion.choices[0].message.content);
+  } catch (err) {
+    console.error('[analyzeIntent] failed:', err.message);
+    return { intent: 'none' };
+  }
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // POST /api/chat — main conversation endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages = [], userProfile = {} } = req.body;
+    const { messages = [] } = req.body;
+    if (!messages.length) return res.status(400).json({ error: 'messages array is required' });
 
-    if (!messages.length) {
-      return res.status(400).json({ error: 'messages array is required' });
+    const lastMessage = messages[messages.length - 1].content;
+    
+    // 1. Fetch Memory & Data Context
+    const { data: memories } = await supabase.from('memory').select('*');
+    const memoryString = memories?.length 
+      ? memories.map(m => `${m.key}: ${m.value}`).join(', ') 
+      : 'No facts known yet.';
+
+    // 2. Intent Detection & Auto-DB
+    const analysis = await analyzeIntent(lastMessage);
+    let autoReply = null;
+    let extraContext = '';
+
+    if (analysis.intent === 'task') {
+      const { title, description, due_date } = analysis.data;
+      await supabase.from('tasks').insert([{ title, description: description || '', due_date: due_date || null, status: 'pending' }]);
+      autoReply = "Got it, I've added that to your tasks.";
+    } else if (analysis.intent === 'note') {
+      const { title, content } = analysis.data;
+      await supabase.from('notes').insert([{ title: title || 'Untitled Note', content }]);
+      autoReply = "Saved to your notes.";
+    } else if (analysis.intent === 'reminder') {
+      const { message, remind_at } = analysis.data;
+      await supabase.from('reminders').insert([{ message, remind_at, is_sent: false }]);
+      autoReply = "Reminder set.";
+    } else if (analysis.intent === 'memory') {
+      const { key, value } = analysis.data;
+      if (key && value) await supabase.from('memory').insert([{ key, value }]);
+      // Silent remember, no autoReply set
+    } else if (analysis.intent === 'retrieval') {
+      const { type } = analysis.data;
+      const { data } = await supabase.from(type).select('*').limit(10);
+      extraContext = `\n[User's ${type} from database: ${JSON.stringify(data)}]`;
     }
+
+    // 3. Generate Main Response
+    const dynamicSystemPrompt = `${SYSTEM_PROMPT}\n\nWhat you know about Parth: ${memoryString}${extraContext}`;
 
     const completion = await groq.chat.completions.create({
       model: MODEL,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: dynamicSystemPrompt },
         ...messages,
       ],
       temperature: 0.8,
       max_tokens: 1024,
     });
 
-    const reply = completion.choices[0]?.message?.content || "I'm having a moment — try again?";
+    let reply = completion.choices[0]?.message?.content || "I'm having a moment — try again?";
+    if (autoReply) reply = `${autoReply} ${reply}`;
+    
     const timestamp = new Date().toISOString();
-
-    await supabase.from('conversations').insert([{ user_message: messages[messages.length - 1].content, friday_reply: reply }]);
+    await supabase.from('conversations').insert([{ user_message: lastMessage, friday_reply: reply }]);
 
     res.json({ reply, timestamp });
   } catch (err) {
     console.error('[/api/chat]', err.message);
-    res.status(500).json({ error: 'Failed to get response from Groq', detail: err.message });
+    res.status(500).json({ error: 'Failed to process chat', detail: err.message });
   }
 });
 
