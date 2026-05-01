@@ -27,86 +27,75 @@ def execute_action(command):
                 
             # Apps
             try:
-                if target in ["cs2", "counter strike"]:
-                    os.startfile('steam://rungameid/730')
-                    return True, "Opened Counter Strike 2"
-                elif target == "spotify" or target == "spotify app":
-                    os.startfile('spotify:')
-                    return True, "Opened Spotify"
-                elif target in ["vs code", "vscode", "code"]:
-                    try:
-                        os.startfile('code.cmd') # VS Code often registers this
-                    except:
-                        subprocess.Popen(['code'], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                    return True, "Opened VS Code"
-                elif target == "chrome":
-                    try:
-                        os.startfile('chrome.exe')
-                    except:
-                        chrome_paths = [r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]
-                        for p in chrome_paths:
-                            if os.path.exists(p):
-                                os.startfile(p)
-                                return True, "Opened Chrome"
-                        return False, "Could not find Chrome"
-                    return True, "Opened Chrome"
-                elif target == "opera":
-                    try:
-                        os.startfile('opera.exe')
-                    except:
-                        opera_paths = [os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera\opera.exe"), r"C:\Program Files\Opera\opera.exe"]
-                        for p in opera_paths:
-                            if os.path.exists(p):
-                                os.startfile(p)
-                                return True, "Opened Opera"
-                        return False, "Could not find Opera"
-                    return True, "Opened Opera"
-                elif target == "discord":
-                    discord_path = os.path.join(os.getenv('LOCALAPPDATA'), "Discord", "Update.exe")
-                    if os.path.exists(discord_path):
-                        subprocess.Popen([discord_path, '--processStart', 'Discord.exe'], creationflags=subprocess.CREATE_NO_WINDOW)
-                    else:
-                        os.startfile('discord:')
-                    return True, "Opened Discord"
-                elif target in ["file explorer", "explorer"]:
-                    os.startfile('explorer.exe')
-                    return True, "Opened File Explorer"
-                elif target == "notepad":
-                    os.startfile('notepad.exe')
-                    return True, "Opened Notepad"
-                elif target == "calculator":
-                    os.startfile('calc.exe')
-                    return True, "Opened Calculator"
-                elif target == "task manager":
-                    os.startfile('taskmgr.exe')
-                    return True, "Opened Task Manager"
+                # --- SMART APP/FILE RESOLVER ---
+                # 1. Broad Friendly Mapping
+                friendly_map = {
+                    "file manager": "explorer.exe",
+                    "file explorer": "explorer.exe",
+                    "this pc": "explorer.exe",
+                    "my computer": "explorer.exe",
+                    "cs2": "steam://rungameid/730",
+                    "counter strike": "steam://rungameid/730",
+                    "settings": "ms-settings:",
+                    "control panel": "control",
+                    "task manager": "taskmgr.exe",
+                    "browser": "opera", # Default to user's preference
+                    "web": "opera",
+                    "terminal": "wt.exe", # Windows Terminal
+                    "cmd": "cmd.exe",
+                    "powershell": "powershell.exe",
+                    "calculator": "calc.exe",
+                    "notepad": "notepad.exe",
+                    "paint": "mspaint.exe",
+                    "camera": "microsoft.windows.camera:",
+                    "photos": "ms-photos:",
+                    "store": "ms-windows-store:"
+                }
                 
-                # --- UNIVERSAL OPEN FALLBACK ---
-                else:
-                    # Try to open directly as a file or registered app
-                    try:
-                        os.startfile(target)
-                        return True, f"Opened {target}"
-                    except:
-                        # Try with .exe extension
-                        try:
-                            os.startfile(f"{target}.exe")
-                            return True, f"Opened {target}"
-                        except:
-                            # Try searching with 'where'
-                            try:
-                                result = subprocess.check_output(['where', target], text=True).split('\n')[0].strip()
-                                if result:
-                                    os.startfile(result)
-                                    return True, f"Opened {target}"
-                            except:
-                                pass
-                    
-                    if '.' in target:
-                        webbrowser.open(f"https://{target}")
-                        return True, f"Opened {target} in browser"
-                    
-                    return False, f"I couldn't find '{target}' on your system. Try giving me the full name or file extension."
+                resolved_target = friendly_map.get(target.lower())
+                if resolved_target:
+                    os.startfile(resolved_target)
+                    return True, f"Opened {target}"
+
+                # 2. Try direct os.startfile
+                try:
+                    os.startfile(target)
+                    return True, f"Opened {target}"
+                except: pass
+
+                # 3. Try with .exe
+                try:
+                    os.startfile(f"{target}.exe")
+                    return True, f"Opened {target}"
+                except: pass
+
+                # 4. Search common paths
+                search_roots = [
+                    os.path.join(os.environ["ProgramFiles"]),
+                    os.path.join(os.environ["ProgramFiles(x86)"]),
+                    os.path.join(os.environ["LOCALAPPDATA"], "Programs"),
+                    os.path.join(os.path.expanduser("~"), "Desktop")
+                ]
+                
+                for root in search_roots:
+                    if not os.path.exists(root): continue
+                    for dirpath, _, filenames in os.walk(root):
+                        # Limit depth for speed
+                        if dirpath.count(os.sep) - root.count(os.sep) > 2:
+                            continue
+                        for f in filenames:
+                            if target.lower() in f.lower() and f.endswith(".exe"):
+                                full_path = os.path.join(dirpath, f)
+                                os.startfile(full_path)
+                                return True, f"Found and opened: {f}"
+                
+                # 5. Try 'start' via shell for protocols or registered aliases
+                try:
+                    subprocess.Popen(f'start {target}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    return True, f"Triggered system start for {target}"
+                except: pass
+
+                return False, f"I searched everywhere but couldn't find '{target}'. Try saying the full app name or checking if it's installed."
             except Exception as e:
                 return False, f"Failed to launch {target}: {str(e)}"
 
@@ -170,15 +159,21 @@ def execute_action(command):
                 "discord": "Discord.exe",
                 "notepad": "notepad.exe",
                 "calculator": "calc.exe",
-                "task manager": "taskmgr.exe"
+                "task manager": "taskmgr.exe",
+                "file manager": "explorer.exe",
+                "explorer": "explorer.exe",
+                "cs2": "cs2.exe"
             }
             
             pname = process_map.get(target.lower(), f"{target}.exe")
             try:
-                # Try killing by process name
+                # Try killing by process name (with and without .exe)
                 subprocess.run(['taskkill', '/F', '/IM', pname], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                # Also try killing by window title wildcard (very effective for files/folders)
+                subprocess.run(['taskkill', '/F', '/IM', target], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                # Also try killing by window title wildcard
                 subprocess.run(['taskkill', '/F', '/FI', f"WINDOWTITLE eq {target}*"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                
                 return True, f"Closed {target}"
             except Exception as e:
                 return False, f"Failed to close {target}: {str(e)}"
