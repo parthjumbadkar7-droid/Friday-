@@ -88,6 +88,8 @@ app.post('/api/chat', async (req, res) => {
     const reply = completion.choices[0]?.message?.content || "I'm having a moment — try again?";
     const timestamp = new Date().toISOString();
 
+    await supabase.from('conversations').insert([{ user_message: messages[messages.length - 1].content, friday_reply: reply }]);
+
     res.json({ reply, timestamp });
   } catch (err) {
     console.error('[/api/chat]', err.message);
