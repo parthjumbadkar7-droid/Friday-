@@ -348,7 +348,7 @@ app.post('/api/tools/search', async (req, res) => {
   }
 });
 
-// GET /api/history — return all sessions from Supabase
+// GET /api/history — return sessions from Supabase (fallback to local JSON)
 app.get('/api/history', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -356,15 +356,17 @@ app.get('/api/history', async (req, res) => {
       .select('*')
       .order('timestamp', { ascending: false });
     
-    if (error) throw error;
+    if (error) {
+      console.warn('⚠️ sessions table missing in Supabase. Falling back to local history.json.');
+      return res.json(readHistory());
+    }
     res.json(data || []);
   } catch (err) {
-    console.error('[GET /api/history]', err.message);
-    res.status(500).json({ error: 'Failed to fetch history' });
+    res.json(readHistory());
   }
 });
 
-// POST /api/history — save or update a session in Supabase
+// POST /api/history — save session to Supabase & local JSON
 app.post('/api/history', async (req, res) => {
   try {
     let { id, title, messages, timestamp } = req.body;
@@ -374,14 +376,24 @@ app.post('/api/history', async (req, res) => {
       title = await generateChatTitle(messages);
     }
 
-    const { error } = await supabase.from('sessions').upsert({
+    const sessionData = {
       id,
       title,
       messages,
       timestamp: timestamp || new Date().toISOString()
-    });
+    };
 
-    if (error) throw error;
+    // Always save local first for reliability
+    const localHistory = readHistory();
+    const existingIndex = localHistory.findIndex((c) => c.id === id);
+    if (existingIndex >= 0) localHistory[existingIndex] = sessionData;
+    else localHistory.push(sessionData);
+    writeHistory(localHistory);
+
+    // Try Supabase
+    const { error } = await supabase.from('sessions').upsert(sessionData);
+    if (error) console.error('[Supabase Save Error]', error.message);
+
     res.json({ success: true });
   } catch (err) {
     console.error('[POST /api/history]', err.message);

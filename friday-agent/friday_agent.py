@@ -30,6 +30,8 @@ def execute_action(command):
                 # --- SMART APP/FILE RESOLVER ---
                 # 1. Broad Friendly Mapping
                 friendly_map = {
+                    "whatsapp": "whatsapp:",
+                    "telegram": "tg:",
                     "file manager": "explorer.exe",
                     "file explorer": "explorer.exe",
                     "this pc": "explorer.exe",
@@ -39,9 +41,9 @@ def execute_action(command):
                     "settings": "ms-settings:",
                     "control panel": "control",
                     "task manager": "taskmgr.exe",
-                    "browser": "opera", # Default to user's preference
+                    "browser": "opera",
                     "web": "opera",
-                    "terminal": "wt.exe", # Windows Terminal
+                    "terminal": "wt.exe",
                     "cmd": "cmd.exe",
                     "powershell": "powershell.exe",
                     "calculator": "calc.exe",
@@ -49,15 +51,21 @@ def execute_action(command):
                     "paint": "mspaint.exe",
                     "camera": "microsoft.windows.camera:",
                     "photos": "ms-photos:",
-                    "store": "ms-windows-store:"
+                    "store": "ms-windows-store:",
+                    "mail": "outlookmail:",
+                    "calendar": "outlookcal:",
+                    "maps": "bingmaps:",
+                    "weather": "bingweather:"
                 }
                 
                 resolved_target = friendly_map.get(target.lower())
                 if resolved_target:
-                    os.startfile(resolved_target)
-                    return True, f"Opened {target}"
+                    try:
+                        os.startfile(resolved_target)
+                        return True, f"Opened {target}"
+                    except: pass
 
-                # 2. Try direct os.startfile
+                # 2. Try direct os.startfile (handles protocols and registered exes)
                 try:
                     os.startfile(target)
                     return True, f"Opened {target}"
@@ -69,11 +77,12 @@ def execute_action(command):
                     return True, f"Opened {target}"
                 except: pass
 
-                # 4. Search common paths
+                # 4. Search deep roots including AppData
                 search_roots = [
                     os.path.join(os.environ["ProgramFiles"]),
                     os.path.join(os.environ["ProgramFiles(x86)"]),
-                    os.path.join(os.environ["LOCALAPPDATA"], "Programs"),
+                    os.path.join(os.environ["LOCALAPPDATA"]), # Crucial for WhatsApp/Discord
+                    os.path.join(os.environ["APPDATA"]),
                     os.path.join(os.path.expanduser("~"), "Desktop")
                 ]
                 
