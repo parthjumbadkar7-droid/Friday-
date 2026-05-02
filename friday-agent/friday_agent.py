@@ -25,6 +25,7 @@ app = Flask(__name__)
 BACKEND_URL = os.getenv('RENDER_BACKEND_URL', 'https://friday-lwx5.onrender.com')
 AGENT_SECRET = os.getenv('AGENT_SECRET', 'friday-secret-2024')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+TUNNEL_URL = None  # Updated by start_friday.py when tunnel opens
 
 # ─────────────────────────────────────────────
 #  APP MAP  (Windows paths + UWP shell IDs)
@@ -415,6 +416,14 @@ def execute_direct():
     return jsonify({"results": results, "status": "ok"})
 
 
+@app.route('/api/set-url', methods=['POST'])
+def set_url():
+    global TUNNEL_URL
+    data = request.json
+    TUNNEL_URL = data.get('url')
+    print(f"✨ Agent URL updated: {TUNNEL_URL}")
+    return jsonify({"success": True})
+
 # ─────────────────────────────────────────────
 #  HEARTBEAT  (keeps agent "online" in frontend)
 # ─────────────────────────────────────────────
@@ -425,7 +434,11 @@ def heartbeat_loop():
         try:
             res = requests.post(
                 f"{BACKEND_URL}/api/agent/heartbeat",
-                json={"secret": AGENT_SECRET, "status": "online"},
+                json={
+                    "secret": AGENT_SECRET, 
+                    "status": "online",
+                    "url": TUNNEL_URL
+                },
                 timeout=8
             )
             if res.status_code == 200:

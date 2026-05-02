@@ -4,18 +4,20 @@
  * Handles:
  *  - POST /api/agent/heartbeat   ← agent pings this every 15s
  *  - GET  /api/agent/status      ← frontend polls this to show online/offline
+ *  - POST /api/agent/register    ← agent registers its tunnel URL
  *  - POST /api/agent/command     ← frontend sends natural language commands
  *  - POST /api/agent/execute     ← frontend sends direct actions
  */
 
 import express from 'express';
 import axios from 'axios';
+import { supabase } from '../supabase.js';
 
 const router = express.Router();
 
 const AGENT_SECRET = process.env.AGENT_SECRET || 'friday-secret-2024';
 
-// In-memory state (resets on Render restart, that's fine)
+// In-memory state (resets on Render restart, synced from Supabase on cold start)
 let agentState = {
   status: 'offline',
   url: process.env.LOCAL_AGENT_URL || null,
@@ -23,11 +25,29 @@ let agentState = {
   lastSeen: null,
 };
 
+// Helper: Sync state to Supabase
+async function syncToSupabase(state) {
+  try {
+    const { error } = await supabase
+      .from('agent_state')
+      .upsert({
+        id: 1,
+        url: state.url,
+        status: state.status,
+        last_seen: state.lastSeen,
+        last_heartbeat: state.lastHeartbeat ? new Date(state.lastHeartbeat).toISOString() : null
+      });
+    if (error) console.error('[Supabase Sync Error]', error.message);
+  } catch (err) {
+    console.error('[Supabase Sync Exception]', err.message);
+  }
+}
+
 // ──────────────────────────────────────────────
 //  HEARTBEAT  (called by Python agent every 15s)
 // ──────────────────────────────────────────────
-router.post('/heartbeat', (req, res) => {
-  const { secret, status } = req.body;
+router.post('/heartbeat', async (req, res) => {
+  const { secret, status, url } = req.body;
 
   if (secret !== AGENT_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -36,6 +56,9 @@ router.post('/heartbeat', (req, res) => {
   agentState.status = status || 'online';
   agentState.lastHeartbeat = Date.now();
   agentState.lastSeen = new Date().toISOString();
+  if (url) agentState.url = url;
+
+  await syncToSupabase(agentState);
 
   return res.json({ ok: true, received: agentState.lastSeen });
 });
@@ -43,9 +66,29 @@ router.post('/heartbeat', (req, res) => {
 // ──────────────────────────────────────────────
 //  STATUS  (polled by frontend every 10s)
 // ──────────────────────────────────────────────
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const now = Date.now();
   const TIMEOUT_MS = 30_000; // 30 seconds
+
+  // COLD START RECOVERY: Load from Supabase if memory is empty
+  if (!agentState.lastHeartbeat) {
+    try {
+      const { data, error } = await supabase
+        .from('agent_state')
+        .select('*')
+        .eq('id', 1)
+        .single();
+      
+      if (data && !error) {
+        agentState.url = data.url;
+        agentState.status = data.status;
+        agentState.lastSeen = data.last_seen;
+        agentState.lastHeartbeat = data.last_heartbeat ? new Date(data.last_heartbeat).getTime() : null;
+      }
+    } catch (err) {
+      console.error('[Supabase Load Error]', err.message);
+    }
+  }
 
   // If last heartbeat was > 30s ago, mark offline
   if (!agentState.lastHeartbeat || now - agentState.lastHeartbeat > TIMEOUT_MS) {
@@ -62,10 +105,9 @@ router.get('/status', (req, res) => {
 // ──────────────────────────────────────────────
 //  REGISTER AGENT URL  (called by start_friday.py)
 // ──────────────────────────────────────────────
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { url, secret } = req.body;
 
-  // Accept with or without secret for backwards compatibility
   if (secret && secret !== AGENT_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -74,6 +116,8 @@ router.post('/register', (req, res) => {
   agentState.status = 'online';
   agentState.lastHeartbeat = Date.now();
   agentState.lastSeen = new Date().toISOString();
+
+  await syncToSupabase(agentState);
 
   console.log(`✓ Agent registered: ${url}`);
   return res.json({ ok: true, url });
@@ -107,9 +151,9 @@ router.post('/command', async (req, res) => {
     const detail = err.response?.data || err.message;
     console.error('Agent command error:', detail);
 
-    // If agent is unreachable, mark it offline
     if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
       agentState.status = 'offline';
+      await syncToSupabase(agentState);
     }
 
     return res.status(502).json({ error: 'Agent did not respond', detail });

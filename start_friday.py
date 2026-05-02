@@ -194,6 +194,11 @@ def start_tunnel():
                         
                         # Run registrations in background so tunnel keeps reading
                         def register_all(url=tunnel_url):
+                            # Tell the local agent its own URL
+                            try:
+                                requests.post('http://localhost:5001/api/set-url', json={'url': url}, timeout=5)
+                            except: pass
+                            
                             update_render_url(url)
                             register_with_backend(url)
                             print("\n✅ FRIDAY is fully online!")
