@@ -39,19 +39,19 @@ APP_MAP = {
     # Dev tools
     "vs code":       r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
     "vscode":        r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-    "terminal":      "wt",          # Windows Terminal
+    "terminal":      "wt",
     "cmd":           "cmd",
     "powershell":    "powershell",
     "git bash":      r"C:\Program Files\Git\git-bash.exe",
 
-    # Communication (UWP)
-    "whatsapp":      r"shell:AppsFolder\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsApp",
+    # Communication
+    "whatsapp":      r"C:\Users\{user}\AppData\Local\WhatsApp\WhatsApp.exe",
     "discord":       r"C:\Users\{user}\AppData\Local\Discord\Update.exe --processStart Discord.exe",
     "telegram":      r"shell:AppsFolder\TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
     "slack":         r"C:\Users\{user}\AppData\Local\slack\slack.exe",
 
-    # Media
-    "spotify":       r"shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+    # Media — use direct exe paths first, UWP as fallback
+    "spotify":       r"C:\Users\{user}\AppData\Roaming\Spotify\Spotify.exe",
     "vlc":           r"C:\Program Files\VideoLAN\VLC\vlc.exe",
 
     # Games
@@ -59,7 +59,7 @@ APP_MAP = {
     "cs2":           "steam://rungameid/730",
     "counter strike":"steam://rungameid/730",
 
-    # System
+    # System tools
     "file explorer": "explorer",
     "notepad":       "notepad",
     "paint":         "mspaint",
@@ -82,6 +82,14 @@ WEBSITE_MAP = {
     "linkedin":  "https://linkedin.com",
     "chatgpt":   "https://chat.openai.com",
     "claude":    "https://claude.ai",
+    "spotify":   "https://open.spotify.com",
+    "whatsapp":  "https://web.whatsapp.com",
+    "discord":   "https://discord.com/app",
+    "notion":    "https://notion.so",
+    "figma":     "https://figma.com",
+    "vercel":    "https://vercel.com",
+    "render":    "https://render.com",
+    "supabase":  "https://supabase.com",
 }
 
 USERNAME = os.environ.get("USERNAME", "Parth")
@@ -102,7 +110,10 @@ def open_app(app_name):
         
         # UWP shell apps
         if target.startswith("shell:") or target.startswith("ms-"):
-            subprocess.Popen(["explorer", target], shell=False)
+            try:
+                os.startfile(target)
+            except Exception:
+                subprocess.Popen(f'explorer "{target}"', shell=True)
             return f"✓ Opened {app_name}"
         
         # Steam protocol
@@ -120,9 +131,9 @@ def open_app(app_name):
             subprocess.Popen(target, shell=True)
             return f"✓ Tried to open {app_name}"
     
-    # Not in map → try as raw command
+    # Not in map → try as raw command or Windows Search
     try:
-        subprocess.Popen(name, shell=True)
+        subprocess.Popen(f'start "" "{name}"', shell=True)
         return f"✓ Attempted to open: {name}"
     except Exception as e:
         return f"✗ Could not open {app_name}: {e}"
