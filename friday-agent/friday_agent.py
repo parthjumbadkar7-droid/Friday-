@@ -31,42 +31,15 @@ TUNNEL_URL = None  # Updated by start_friday.py when tunnel opens
 #  APP MAP  (Windows paths + UWP shell IDs)
 # ─────────────────────────────────────────────
 APP_MAP = {
-    # Browsers
-    "chrome":        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    "firefox":       r"C:\Program Files\Mozilla Firefox\firefox.exe",
-    "edge":          r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-
-    # Dev tools
-    "vs code":       r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-    "vscode":        r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-    "terminal":      "wt",
-    "cmd":           "cmd",
-    "powershell":    "powershell",
-    "git bash":      r"C:\Program Files\Git\git-bash.exe",
-
-    # Communication
-    "whatsapp":      r"C:\Users\{user}\AppData\Local\WhatsApp\WhatsApp.exe",
-    "discord":       r"C:\Users\{user}\AppData\Local\Discord\Update.exe --processStart Discord.exe",
+    # Only keep these — they NEED special handling
+    "whatsapp":      f"C:\\Users\\{USERNAME}\\AppData\\Local\\WhatsApp\\WhatsApp.exe",
+    "spotify":       f"C:\\Users\\{USERNAME}\\AppData\\Roaming\\Spotify\\Spotify.exe",
     "telegram":      r"shell:AppsFolder\TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
-    "slack":         r"C:\Users\{user}\AppData\Local\slack\slack.exe",
-
-    # Media — use direct exe paths first, UWP as fallback
-    "spotify":       r"C:\Users\{user}\AppData\Roaming\Spotify\Spotify.exe",
-    "vlc":           r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-
-    # Games
-    "steam":         r"C:\Program Files (x86)\Steam\Steam.exe",
+    "camera":        r"shell:AppsFolder\Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+    "settings":      "ms-settings:",
     "cs2":           "steam://rungameid/730",
     "counter strike":"steam://rungameid/730",
-
-    # System tools
-    "file explorer": "explorer",
-    "notepad":       "notepad",
-    "paint":         "mspaint",
-    "calculator":    "calc",
-    "task manager":  "taskmgr",
-    "settings":      "ms-settings:",
-    "camera":        r"shell:AppsFolder\Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+    "discord":       f"C:\\Users\\{USERNAME}\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe",
 }
 
 WEBSITE_MAP = {
@@ -105,38 +78,58 @@ def resolve_path(path):
 def open_app(app_name):
     name = app_name.lower().strip()
     
+    # Method 1: Check APP_MAP first (for known UWP/special apps)
     if name in APP_MAP:
         target = resolve_path(APP_MAP[name])
-        
-        # UWP shell apps
         if target.startswith("shell:") or target.startswith("ms-"):
             try:
                 os.startfile(target)
             except Exception:
                 subprocess.Popen(f'explorer "{target}"', shell=True)
             return f"✓ Opened {app_name}"
-        
-        # Steam protocol
         if target.startswith("steam://"):
             webbrowser.open(target)
             return f"✓ Launched {app_name} via Steam"
-        
-        # Regular exe — check it exists first
         exe = target.split()[0]
         if os.path.exists(exe):
             subprocess.Popen(target, shell=True)
             return f"✓ Opened {app_name}"
-        else:
-            # Try just the command name (it might be in PATH)
-            subprocess.Popen(target, shell=True)
-            return f"✓ Tried to open {app_name}"
-    
-    # Not in map → try as raw command or Windows Search
+
+    # Method 2: Try Windows START command (works for most installed apps)
     try:
-        subprocess.Popen(f'start "" "{name}"', shell=True)
-        return f"✓ Attempted to open: {name}"
-    except Exception as e:
-        return f"✗ Could not open {app_name}: {e}"
+        subprocess.Popen(f'start "" "{app_name}"', shell=True)
+        time.sleep(1)
+        return f"✓ Opened {app_name}"
+    except Exception:
+        pass
+
+    # Method 3: Search for exe in common install locations
+    search_dirs = [
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        f"C:\\Users\\{USERNAME}\\AppData\\Local",
+        f"C:\\Users\\{USERNAME}\\AppData\\Roaming",
+    ]
+    for d in search_dirs:
+        try:
+            matches = glob.glob(os.path.join(d, "**", f"{app_name}*.exe"), recursive=True)
+            if matches:
+                subprocess.Popen(f'"{matches[0]}"', shell=True)
+                return f"✓ Found and opened {app_name}"
+        except Exception:
+            continue
+
+    # Method 4: Try Windows Search via shell
+    try:
+        subprocess.Popen(f'explorer shell:AppsFolder', shell=True)
+        time.sleep(0.5)
+        subprocess.Popen(f'start "" "{app_name}"', shell=True)
+        return f"✓ Attempted to open {app_name}"
+    except Exception:
+        pass
+
+    # Method 5: Ask user for exact name
+    return f"✗ Could not find {app_name}. Try saying the exact app name."
 
 
 def open_website(url_or_name):
