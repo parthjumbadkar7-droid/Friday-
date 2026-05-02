@@ -64,16 +64,21 @@ export async function deleteHistory(id) {
 }
 
 export async function executeCommand(command) {
-  const res = await fetch(`${BASE}/execute-command`, {
+  const res = await fetch(`${BASE}/api/agent/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command }),
+    body: JSON.stringify({ message: command }),
   });
   if (!res.ok) throw new Error(`Execute command error: ${res.status}`);
-  return res.json(); // { success, message }
+  return res.json();
 }
 export async function checkAgentStatus() {
-  const res = await fetch(`${BASE}/health/agent`);
-  if (!res.ok) return { online: false };
-  return res.json(); // { online: boolean }
+  try {
+    const res = await fetch(`${BASE}/api/agent/status`);
+    if (!res.ok) return { online: false };
+    const data = await res.json();
+    return { online: data.status === 'online' };
+  } catch {
+    return { online: false };
+  }
 }

@@ -18,10 +18,6 @@ function detectToolIntent(text) {
   if (/(search|look up|find|what is|who is|define|meaning of|tell me about)/.test(lower)) {
     return { type: 'search', query: text };
   }
-  // System commands
-  if (/^(open|close|shutdown|restart|sleep|volume|mute|lock screen|create note|take screenshot)/.test(lower)) {
-    return { type: 'system', command: text };
-  }
   return null;
 }
 
@@ -131,19 +127,6 @@ export default function ChatCard({
         } catch {
           setToolState(null);
         }
-      }
-
-      // If it's a system command, we just report the result back directly, no need for Groq to talk much
-      if (toolIntent && toolIntent.type === 'system') {
-        const reply = toolData && toolData.success 
-          ? `Done! ${toolData.message}` 
-          : (toolData?.message || "I can't control your device right now, the local agent is not running");
-        
-        const fridayMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
-        setMessages((prev) => [...prev, fridayMsg]);
-        speak(reply);
-        setLoading(false);
-        return;
       }
 
       // Build context for Groq — inject tool result if available
