@@ -1,211 +1,459 @@
-import os
+"""
+FRIDAY Agent - Full Agentic Computer Control
+Runs on your laptop. Controls everything. Reports heartbeat to backend.
+"""
+
 import subprocess
-import webbrowser
-import pathlib
-from flask import Flask, request, jsonify
+import threading
+import time
+import os
+import json
+import sys
+import ctypes
 import pyautogui
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import webbrowser
+import glob
+import platform
+import requests
+from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', 'friday-backend', '.env'))
 
 app = Flask(__name__)
 
-def execute_action(command):
-    cmd = command.lower().strip()
+BACKEND_URL = os.getenv('RENDER_BACKEND_URL', 'https://friday-lwx5.onrender.com')
+AGENT_SECRET = os.getenv('AGENT_SECRET', 'friday-secret-2024')
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+
+# ─────────────────────────────────────────────
+#  APP MAP  (Windows paths + UWP shell IDs)
+# ─────────────────────────────────────────────
+APP_MAP = {
+    # Browsers
+    "chrome":        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "firefox":       r"C:\Program Files\Mozilla Firefox\firefox.exe",
+    "edge":          r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+
+    # Dev tools
+    "vs code":       r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+    "vscode":        r"C:\Users\{user}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+    "terminal":      "wt",          # Windows Terminal
+    "cmd":           "cmd",
+    "powershell":    "powershell",
+    "git bash":      r"C:\Program Files\Git\git-bash.exe",
+
+    # Communication (UWP)
+    "whatsapp":      r"shell:AppsFolder\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsApp",
+    "discord":       r"C:\Users\{user}\AppData\Local\Discord\Update.exe --processStart Discord.exe",
+    "telegram":      r"shell:AppsFolder\TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
+    "slack":         r"C:\Users\{user}\AppData\Local\slack\slack.exe",
+
+    # Media
+    "spotify":       r"shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+    "vlc":           r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+
+    # Games
+    "steam":         r"C:\Program Files (x86)\Steam\Steam.exe",
+    "cs2":           "steam://rungameid/730",
+    "counter strike":"steam://rungameid/730",
+
+    # System
+    "file explorer": "explorer",
+    "notepad":       "notepad",
+    "paint":         "mspaint",
+    "calculator":    "calc",
+    "task manager":  "taskmgr",
+    "settings":      "ms-settings:",
+    "camera":        r"shell:AppsFolder\Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+}
+
+WEBSITE_MAP = {
+    "youtube":   "https://youtube.com",
+    "github":    "https://github.com",
+    "google":    "https://google.com",
+    "gmail":     "https://mail.google.com",
+    "reddit":    "https://reddit.com",
+    "netflix":   "https://netflix.com",
+    "twitter":   "https://twitter.com",
+    "x":         "https://x.com",
+    "instagram": "https://instagram.com",
+    "linkedin":  "https://linkedin.com",
+    "chatgpt":   "https://chat.openai.com",
+    "claude":    "https://claude.ai",
+}
+
+USERNAME = os.environ.get("USERNAME", "Parth")
+
+def resolve_path(path):
+    return path.replace("{user}", USERNAME)
+
+
+# ─────────────────────────────────────────────
+#  CORE EXECUTORS
+# ─────────────────────────────────────────────
+
+def open_app(app_name):
+    name = app_name.lower().strip()
+    
+    if name in APP_MAP:
+        target = resolve_path(APP_MAP[name])
+        
+        # UWP shell apps
+        if target.startswith("shell:") or target.startswith("ms-"):
+            subprocess.Popen(["explorer", target], shell=False)
+            return f"✓ Opened {app_name}"
+        
+        # Steam protocol
+        if target.startswith("steam://"):
+            webbrowser.open(target)
+            return f"✓ Launched {app_name} via Steam"
+        
+        # Regular exe — check it exists first
+        exe = target.split()[0]
+        if os.path.exists(exe):
+            subprocess.Popen(target, shell=True)
+            return f"✓ Opened {app_name}"
+        else:
+            # Try just the command name (it might be in PATH)
+            subprocess.Popen(target, shell=True)
+            return f"✓ Tried to open {app_name}"
+    
+    # Not in map → try as raw command
+    try:
+        subprocess.Popen(name, shell=True)
+        return f"✓ Attempted to open: {name}"
+    except Exception as e:
+        return f"✗ Could not open {app_name}: {e}"
+
+
+def open_website(url_or_name):
+    name = url_or_name.lower().strip()
+    if name in WEBSITE_MAP:
+        url = WEBSITE_MAP[name]
+    elif url_or_name.startswith("http"):
+        url = url_or_name
+    else:
+        url = f"https://{url_or_name}"
+    
+    webbrowser.open(url)
+    return f"✓ Opened {url}"
+
+
+def search_web(query):
+    url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
+    webbrowser.open(url)
+    return f"✓ Searched Google for: {query}"
+
+
+def open_file_or_folder(path):
+    expanded = os.path.expanduser(path)
+    if os.path.exists(expanded):
+        os.startfile(expanded)
+        return f"✓ Opened: {expanded}"
+    
+    # Try searching common locations
+    search_paths = [
+        os.path.expanduser("~/Desktop"),
+        os.path.expanduser("~/Documents"),
+        os.path.expanduser("~/Downloads"),
+        os.path.expanduser("~/Pictures"),
+    ]
+    filename = os.path.basename(path)
+    for sp in search_paths:
+        matches = glob.glob(os.path.join(sp, "**", filename), recursive=True)
+        if matches:
+            os.startfile(matches[0])
+            return f"✓ Found and opened: {matches[0]}"
+    
+    return f"✗ File not found: {path}"
+
+
+def take_screenshot(save_path=None):
+    if not save_path:
+        save_path = os.path.join(os.path.expanduser("~"), "Desktop", f"friday_screenshot_{int(time.time())}.png")
+    screenshot = pyautogui.screenshot()
+    screenshot.save(save_path)
+    return f"✓ Screenshot saved to: {save_path}"
+
+
+def system_control(action):
+    action = action.lower()
+    if action == "shutdown":
+        subprocess.run(["shutdown", "/s", "/t", "30"])
+        return "✓ Shutting down in 30 seconds (run 'shutdown /a' to cancel)"
+    elif action == "restart":
+        subprocess.run(["shutdown", "/r", "/t", "30"])
+        return "✓ Restarting in 30 seconds"
+    elif action == "lock":
+        ctypes.windll.user32.LockWorkStation()
+        return "✓ Screen locked"
+    elif action == "sleep":
+        subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+        return "✓ Going to sleep"
+    elif action == "volume up":
+        for _ in range(5):
+            pyautogui.press("volumeup")
+        return "✓ Volume increased"
+    elif action == "volume down":
+        for _ in range(5):
+            pyautogui.press("volumedown")
+        return "✓ Volume decreased"
+    elif action == "mute":
+        pyautogui.press("volumemute")
+        return "✓ Toggled mute"
+    return f"✗ Unknown system action: {action}"
+
+
+def type_and_send(app_context, message):
+    """Type text into whatever is focused. Works in WhatsApp, Telegram, etc."""
+    time.sleep(1)
+    pyautogui.typewrite(message, interval=0.03)
+    time.sleep(0.3)
+    pyautogui.press("enter")
+    return f"✓ Typed and sent: {message}"
+
+
+def run_shell_command(cmd):
+    try:
+        result = subprocess.run(
+            cmd, shell=True,
+            capture_output=True, text=True, timeout=30
+        )
+        output = result.stdout or result.stderr or "(no output)"
+        return f"✓ Command executed:\n{output[:1000]}"
+    except subprocess.TimeoutExpired:
+        return "✗ Command timed out after 30s"
+    except Exception as e:
+        return f"✗ Error: {e}"
+
+
+def download_file(url, dest_folder=None):
+    if not dest_folder:
+        dest_folder = os.path.expanduser("~/Downloads")
+    
+    filename = url.split("/")[-1].split("?")[0] or "friday_download"
+    save_path = os.path.join(dest_folder, filename)
     
     try:
-        # --- OPEN WEBSITES ---
-        if cmd.startswith("open "):
-            target = cmd[5:].strip()
-            
-            # Websites (always webbrowser)
-            if target in ["youtube", "github", "google", "netflix", "spotify web"]:
-                url = f"https://{target.replace(' ', '')}.com"
-                if target == "spotify web": url = "https://open.spotify.com"
-                webbrowser.open(url)
-                return True, f"Opened {target.title()}"
-                
-            # Apps
-            try:
-                # --- SMART APP/FILE RESOLVER ---
-                # 1. Broad Friendly Mapping
-                friendly_map = {
-                    "whatsapp": "whatsapp:",
-                    "telegram": "tg:",
-                    "file manager": "explorer.exe",
-                    "file explorer": "explorer.exe",
-                    "this pc": "explorer.exe",
-                    "my computer": "explorer.exe",
-                    "cs2": "steam://rungameid/730",
-                    "counter strike": "steam://rungameid/730",
-                    "settings": "ms-settings:",
-                    "control panel": "control",
-                    "task manager": "taskmgr.exe",
-                    "browser": "opera",
-                    "web": "opera",
-                    "terminal": "wt.exe",
-                    "cmd": "cmd.exe",
-                    "powershell": "powershell.exe",
-                    "calculator": "calc.exe",
-                    "notepad": "notepad.exe",
-                    "paint": "mspaint.exe",
-                    "camera": "microsoft.windows.camera:",
-                    "photos": "ms-photos:",
-                    "store": "ms-windows-store:",
-                    "mail": "outlookmail:",
-                    "calendar": "outlookcal:",
-                    "maps": "bingmaps:",
-                    "weather": "bingweather:"
-                }
-                
-                resolved_target = friendly_map.get(target.lower())
-                if resolved_target:
-                    try:
-                        os.startfile(resolved_target)
-                        return True, f"Opened {target}"
-                    except: pass
-
-                # 2. Try direct os.startfile (handles protocols and registered exes)
-                try:
-                    os.startfile(target)
-                    return True, f"Opened {target}"
-                except: pass
-
-                # 3. Try with .exe
-                try:
-                    os.startfile(f"{target}.exe")
-                    return True, f"Opened {target}"
-                except: pass
-
-                # 4. Search deep roots including AppData
-                search_roots = [
-                    os.path.join(os.environ["ProgramFiles"]),
-                    os.path.join(os.environ["ProgramFiles(x86)"]),
-                    os.path.join(os.environ["LOCALAPPDATA"]), # Crucial for WhatsApp/Discord
-                    os.path.join(os.environ["APPDATA"]),
-                    os.path.join(os.path.expanduser("~"), "Desktop")
-                ]
-                
-                for root in search_roots:
-                    if not os.path.exists(root): continue
-                    for dirpath, _, filenames in os.walk(root):
-                        # Limit depth for speed
-                        if dirpath.count(os.sep) - root.count(os.sep) > 2:
-                            continue
-                        for f in filenames:
-                            if target.lower() in f.lower() and f.endswith(".exe"):
-                                full_path = os.path.join(dirpath, f)
-                                os.startfile(full_path)
-                                return True, f"Found and opened: {f}"
-                
-                # 5. Try 'start' via shell for protocols or registered aliases
-                try:
-                    subprocess.Popen(f'start {target}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                    return True, f"Triggered system start for {target}"
-                except: pass
-
-                return False, f"I searched everywhere but couldn't find '{target}'. Try saying the full app name or checking if it's installed."
-            except Exception as e:
-                return False, f"Failed to launch {target}: {str(e)}"
-
-        # --- SYSTEM CONTROLS ---
-        elif cmd == "shutdown":
-            os.system("shutdown /s /t 0")
-            return True, "Shutting down system"
-        elif cmd == "restart":
-            os.system("shutdown /r /t 0")
-            return True, "Restarting system"
-        elif cmd == "sleep":
-            os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
-            return True, "Sleeping system"
-        elif cmd == "lock screen":
-            os.system("rundll32.exe user32.dll,LockWorkStation")
-            return True, "Locked screen"
-        
-        # --- AUDIO CONTROLS ---
-        elif cmd in ["volume up", "volume down", "mute"]:
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            
-            if cmd == "mute":
-                is_muted = volume.GetMute()
-                volume.SetMute(int(not is_muted), None)
-                return True, f"System {'unmuted' if is_muted else 'muted'}"
-            else:
-                current_vol = volume.GetMasterVolumeLevelScalar()
-                new_vol = min(1.0, current_vol + 0.1) if cmd == "volume up" else max(0.0, current_vol - 0.1)
-                volume.SetMasterVolumeLevelScalar(new_vol, None)
-                return True, f"Volume changed to {int(new_vol * 100)}%"
-        
-        # --- FILE OPERATIONS ---
-        elif cmd.startswith("create note "):
-            note_name = cmd[12:].strip()
-            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
-            note_path = os.path.join(desktop, f"{note_name}.txt")
-            with open(note_path, "w") as f:
-                f.write("")
-            os.startfile(note_path)
-            return True, f"Created note {note_name} on Desktop"
-            
-        elif cmd == "take screenshot":
-            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
-            ss_path = os.path.join(desktop, "screenshot.png")
-            screenshot = pyautogui.screenshot()
-            screenshot.save(ss_path)
-            return True, "Saved screenshot to Desktop"
-            
-        elif cmd.startswith("close "):
-            target = cmd[6:].strip()
-            # Map common names to process names
-            process_map = {
-                "chrome": "chrome.exe",
-                "opera": "opera.exe",
-                "vs code": "code.exe",
-                "vscode": "code.exe",
-                "code": "code.exe",
-                "spotify": "Spotify.exe",
-                "discord": "Discord.exe",
-                "notepad": "notepad.exe",
-                "calculator": "calc.exe",
-                "task manager": "taskmgr.exe",
-                "file manager": "explorer.exe",
-                "explorer": "explorer.exe",
-                "cs2": "cs2.exe"
-            }
-            
-            pname = process_map.get(target.lower(), f"{target}.exe")
-            try:
-                # Try killing by process name (with and without .exe)
-                subprocess.run(['taskkill', '/F', '/IM', pname], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                subprocess.run(['taskkill', '/F', '/IM', target], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                
-                # Also try killing by window title wildcard
-                subprocess.run(['taskkill', '/F', '/FI', f"WINDOWTITLE eq {target}*"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                
-                return True, f"Closed {target}"
-            except Exception as e:
-                return False, f"Failed to close {target}: {str(e)}"
-                
-        return False, "Command not recognized"
-        
+        response = requests.get(url, stream=True, timeout=30)
+        with open(save_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        os.startfile(dest_folder)  # open Downloads folder
+        return f"✓ Downloaded to: {save_path}"
     except Exception as e:
-        return False, f"Error executing command: {str(e)}"
+        return f"✗ Download failed: {e}"
 
-@app.route('/execute', methods=['POST'])
-def execute():
-    data = request.json
-    if not data or 'command' not in data:
-        return jsonify({"success": False, "message": "No command provided"}), 400
+
+def send_whatsapp_message(contact, message):
+    """Open WhatsApp web with a pre-filled message to a contact."""
+    encoded = requests.utils.quote(message)
+    # WhatsApp Web deep link (works if already logged in)
+    url = f"https://web.whatsapp.com/send?phone={contact}&text={encoded}"
+    webbrowser.open(url)
+    time.sleep(5)
+    pyautogui.press("enter")
+    return f"✓ Sent WhatsApp message to {contact}"
+
+
+# ─────────────────────────────────────────────
+#  AGENTIC AI LOOP  (Groq decides what to do)
+# ─────────────────────────────────────────────
+
+SYSTEM_PROMPT = f"""You are FRIDAY, a personal AI assistant running on Parth's laptop.
+You can control Parth's computer by outputting JSON commands.
+
+Your response MUST always be valid JSON with this structure:
+{{
+  "reply": "What you say to Parth (friendly, concise)",
+  "actions": [
+    {{"type": "action_type", "params": {{...}}}}
+  ]
+}}
+
+Available action types and their params:
+- open_app:       {{"app": "spotify"}}
+- open_website:   {{"url": "youtube"}}
+- search_web:     {{"query": "python tutorials"}}
+- open_file:      {{"path": "~/Desktop/report.pdf"}}
+- screenshot:     {{}}
+- system:         {{"action": "lock|shutdown|restart|sleep|volume up|volume down|mute"}}
+- shell:          {{"cmd": "dir C:\\"}}
+- type_send:      {{"message": "Hello!"}}
+- download:       {{"url": "https://...", "folder": "~/Downloads"}}
+- whatsapp:       {{"contact": "+919999999999", "message": "Hey!"}}
+
+Rules:
+- Always respond in JSON. Never plain text.
+- If nothing to do, actions = []
+- Chain multiple actions for complex tasks
+- Be proactive: if user says "play music", open Spotify AND search for the song
+- User is Parth, a hardware engineering student in Amravati, India.
+"""
+
+def ask_groq(user_message, conversation_history=None):
+    if not GROQ_API_KEY:
+        return {"reply": "Groq API key not configured.", "actions": []}
+    
+    messages = []
+    if conversation_history:
+        messages.extend(conversation_history[-6:])  # last 3 turns
+    messages.append({"role": "user", "content": user_message})
+    
+    try:
+        res = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+                "temperature": 0.4,
+                "max_tokens": 1024,
+            },
+            timeout=15
+        )
+        content = res.json()["choices"][0]["message"]["content"]
         
-    command = data['command']
-    success, message = execute_action(command)
+        # Strip markdown fences if present
+        content = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(content)
+    
+    except json.JSONDecodeError:
+        return {"reply": content, "actions": []}
+    except Exception as e:
+        return {"reply": f"AI error: {e}", "actions": []}
+
+
+def execute_actions(actions):
+    results = []
+    for action in actions:
+        action_type = action.get("type")
+        params = action.get("params", {})
+        
+        try:
+            if action_type == "open_app":
+                results.append(open_app(params.get("app", "")))
+            elif action_type == "open_website":
+                results.append(open_website(params.get("url", "")))
+            elif action_type == "search_web":
+                results.append(search_web(params.get("query", "")))
+            elif action_type == "open_file":
+                results.append(open_file_or_folder(params.get("path", "")))
+            elif action_type == "screenshot":
+                results.append(take_screenshot())
+            elif action_type == "system":
+                results.append(system_control(params.get("action", "")))
+            elif action_type == "shell":
+                results.append(run_shell_command(params.get("cmd", "")))
+            elif action_type == "type_send":
+                results.append(type_and_send("", params.get("message", "")))
+            elif action_type == "download":
+                results.append(download_file(params.get("url", ""), params.get("folder")))
+            elif action_type == "whatsapp":
+                results.append(send_whatsapp_message(params.get("contact", ""), params.get("message", "")))
+            else:
+                results.append(f"✗ Unknown action: {action_type}")
+        except Exception as e:
+            results.append(f"✗ Action failed ({action_type}): {e}")
+    
+    return results
+
+
+# ─────────────────────────────────────────────
+#  FLASK ROUTES
+# ─────────────────────────────────────────────
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "online", "agent": "FRIDAY", "timestamp": time.time()})
+
+
+@app.route('/api/command', methods=['POST'])
+def handle_command():
+    data = request.json or {}
+    secret = data.get("secret") or request.headers.get("X-Agent-Secret")
+    
+    if secret != AGENT_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    user_message = data.get("message", "")
+    history = data.get("history", [])
+    
+    if not user_message:
+        return jsonify({"error": "No message provided"}), 400
+    
+    # Let Groq decide what to do
+    ai_response = ask_groq(user_message, history)
+    actions = ai_response.get("actions", [])
+    
+    # Execute the actions
+    action_results = execute_actions(actions)
     
     return jsonify({
-        "success": success,
-        "message": message
+        "reply": ai_response.get("reply", "Done!"),
+        "actions": actions,
+        "results": action_results,
+        "status": "ok"
     })
 
+
+@app.route('/api/execute', methods=['POST'])
+def execute_direct():
+    """Direct command execution without AI (for backend to call specific actions)."""
+    data = request.json or {}
+    secret = data.get("secret") or request.headers.get("X-Agent-Secret")
+    
+    if secret != AGENT_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    actions = data.get("actions", [])
+    results = execute_actions(actions)
+    return jsonify({"results": results, "status": "ok"})
+
+
+# ─────────────────────────────────────────────
+#  HEARTBEAT  (keeps agent "online" in frontend)
+# ─────────────────────────────────────────────
+
+def heartbeat_loop():
+    print("Starting heartbeat loop...")
+    while True:
+        try:
+            res = requests.post(
+                f"{BACKEND_URL}/api/agent/heartbeat",
+                json={"secret": AGENT_SECRET, "status": "online"},
+                timeout=8
+            )
+            if res.status_code == 200:
+                print(f"[{time.strftime('%H:%M:%S')}] ♥ Heartbeat OK")
+            else:
+                print(f"[{time.strftime('%H:%M:%S')}] ⚠ Heartbeat returned {res.status_code}")
+        except requests.exceptions.ConnectionError:
+            print(f"[{time.strftime('%H:%M:%S')}] ✗ Backend unreachable, retrying in 15s...")
+        except Exception as e:
+            print(f"[{time.strftime('%H:%M:%S')}] ✗ Heartbeat error: {e}")
+        time.sleep(15)
+
+
+# ─────────────────────────────────────────────
+#  STARTUP
+# ─────────────────────────────────────────────
+
 if __name__ == '__main__':
-    print("FRIDAY Local Agent running on port 5001...")
-    app.run(port=5001, host='127.0.0.1')
+    print("=" * 50)
+    print("  FRIDAY Agent — Agentic Mode")
+    print("=" * 50)
+    print(f"  Backend: {BACKEND_URL}")
+    print(f"  Groq: {'✓ Ready' if GROQ_API_KEY else '✗ No API key!'}")
+    print("=" * 50)
+    
+    # Start heartbeat in background
+    hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    hb_thread.start()
+    
+    # Start Flask
+    app.run(host='0.0.0.0', port=5001, debug=False)

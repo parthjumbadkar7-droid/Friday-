@@ -158,8 +158,23 @@ export default function ChatCard({
         ];
       }
 
-      const { reply, timestamp } = await sendMessage(contextMessages);
-      const fridayMsg = { role: 'assistant', content: reply, timestamp };
+      const isCommand = (msg) => {
+        const triggers = ['open', 'play', 'download', 'send', 'search', 'close', 'screenshot', 'lock', 'shutdown', 'volume', 'restart', 'type'];
+        return triggers.some(t => msg.toLowerCase().startsWith(t));
+      };
+
+      const endpoint = isCommand(queryText) ? '/api/agent/command' : '/api/chat';
+      const res = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: queryText, history: contextMessages })
+      });
+
+      if (!res.ok) throw new Error('Backend error');
+      const data = await res.json();
+      const reply = data.reply || "Done!";
+      
+      const fridayMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
       setMessages((prev) => [...prev, fridayMsg]);
       speak(reply);
     } catch (err) {

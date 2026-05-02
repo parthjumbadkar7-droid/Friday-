@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabase } from './supabase.js';
+import agentRoutes from './routes/agent.js';
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use('/api/agent', agentRoutes);
 
 // ─── Groq Client ──────────────────────────────────────────────────────────────
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -414,20 +416,7 @@ app.delete('/api/history/:id', async (req, res) => {
   }
 });
 
-// POST /api/register-agent — fast registration of local agent URL
-app.post('/api/register-agent', async (req, res) => {
-  try {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ error: 'URL is required' });
-    
-    // Store in global memory (or Supabase)
-    process.env.LOCAL_AGENT_URL = url;
-    console.log(`\n✨ Local agent registered at: ${url}\n`);
-    res.json({ success: true, message: 'Agent registered' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+
 
 // GET /api/health/agent — Check if local agent is alive
 app.get('/api/health/agent', async (req, res) => {

@@ -1,3 +1,8 @@
+"""
+start_friday.py — FRIDAY Startup Orchestrator
+Starts agent → waits for it → starts tunnel → registers URL with backend
+"""
+
 import subprocess
 import threading
 import time
@@ -5,35 +10,82 @@ import re
 import os
 import signal
 import sys
-from dotenv import load_dotenv
 import requests
+from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), 'friday-backend', '.env'))
 
-RENDER_API_KEY = os.getenv('RENDER_API_KEY')
-RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+RENDER_API_KEY      = os.getenv('RENDER_API_KEY')
+RENDER_SERVICE_ID   = os.getenv('RENDER_SERVICE_ID')
+BACKEND_URL         = os.getenv('RENDER_BACKEND_URL', 'https://friday-lwx5.onrender.com')
+AGENT_SECRET        = os.getenv('AGENT_SECRET', 'friday-secret-2024')
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 AGENT_DIR = os.path.join(BASE_DIR, 'friday-agent')
 
-agent_process = None
+agent_process  = None
 tunnel_process = None
+
+
+# ─────────────────────────────────────────────
+#  INTERNET CHECK
+# ─────────────────────────────────────────────
+
+def wait_for_internet(max_wait=120):
+    """Block until internet is available, up to max_wait seconds."""
+    print("Checking internet connection...")
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            requests.get('https://google.com', timeout=5)
+            print("✓ Internet connected!")
+            return True
+        except:
+            remaining = int(max_wait - (time.time() - start))
+            print(f"  No internet yet. Retrying... ({remaining}s remaining)")
+            time.sleep(8)
+    print("✗ No internet after waiting. FRIDAY may not work properly.")
+    return False
+
+
+# ─────────────────────────────────────────────
+#  AGENT STARTUP
+# ─────────────────────────────────────────────
 
 def start_agent():
     global agent_process
-    print("Starting Friday agent...")
+    print("\nStarting FRIDAY agent...")
     agent_process = subprocess.Popen(
         ['python', 'friday_agent.py'],
         cwd=AGENT_DIR,
         creationflags=subprocess.CREATE_NEW_CONSOLE
     )
-    print("Agent started!")
+    
+    # Wait for agent to be ready
+    print("Waiting for agent to come online...")
+    for i in range(20):
+        time.sleep(2)
+        try:
+            res = requests.get('http://localhost:5001/health', timeout=3)
+            if res.status_code == 200:
+                print("✓ Agent is running on port 5001!")
+                return True
+        except:
+            print(f"  Agent starting... ({(i+1)*2}s)")
+    
+    print("⚠ Agent may not have started correctly. Check the agent window.")
+    return False
+
+
+# ─────────────────────────────────────────────
+#  RENDER URL UPDATE
+# ─────────────────────────────────────────────
 
 def update_render_url(url):
-    print(f"Updating Render with new tunnel URL: {url}")
+    print(f"\nUpdating Render env var with tunnel URL...")
     
     if not RENDER_API_KEY or not RENDER_SERVICE_ID:
-        print("ERROR: RENDER_API_KEY or RENDER_SERVICE_ID missing from .env file!")
+        print("⚠ RENDER_API_KEY or RENDER_SERVICE_ID missing — skipping Render update")
         return
 
     headers = {
@@ -43,30 +95,19 @@ def update_render_url(url):
     }
 
     try:
-        # Get all env vars
         res = requests.get(
             f'https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars',
-            headers=headers,
-            timeout=15
+            headers=headers, timeout=15
         )
-        
-        print(f"GET status: {res.status_code}")
-        
-        if res.status_code == 401:
-            print("ERROR: Invalid Render API key. Check your .env file.")
-            return
-        
         if res.status_code != 200:
-            print(f"Failed to get env vars: {res.text}")
+            print(f"✗ Could not fetch Render env vars: {res.status_code}")
             return
 
         env_vars = res.json()
-        
-        # Build updated list
         updated_vars = []
         found = False
         for var in env_vars:
-            key = var.get('envVar', {}).get('key') or var.get('key', '')
+            key   = var.get('envVar', {}).get('key')   or var.get('key', '')
             value = var.get('envVar', {}).get('value') or var.get('value', '')
             if key == 'LOCAL_AGENT_URL':
                 updated_vars.append({'key': 'LOCAL_AGENT_URL', 'value': url})
@@ -77,61 +118,60 @@ def update_render_url(url):
         if not found:
             updated_vars.append({'key': 'LOCAL_AGENT_URL', 'value': url})
 
-        # Update env vars
         put_res = requests.put(
             f'https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars',
-            headers=headers,
-            json=updated_vars,
-            timeout=15
+            headers=headers, json=updated_vars, timeout=15
         )
-
-        print(f"PUT status: {put_res.status_code}")
-        
         if put_res.status_code in [200, 201]:
-            print(f"\n✓ Render updated successfully!")
-            print(f"✓ Friday can now control your laptop!")
-            print(f"✓ Tunnel URL: {url}\n")
+            print("✓ Render env var updated!")
         else:
-            print(f"Failed to update Render: {put_res.text}")
+            print(f"✗ Render update failed: {put_res.text}")
 
-    except requests.exceptions.Timeout:
-        print("Request timed out. Check your internet connection.")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"✗ Render update error: {e}")
 
-def register_agent_direct(url):
-    print(f"Directly registering agent at: {url}")
-    # We try both localhost and public Render URL
-    targets = ['http://localhost:3001/api/register-agent']
-    # If we have a custom Vercel/Render URL for the backend, we should add it here
-    # For now, let's assume the user might have VITE_API_URL or similar
+
+# ─────────────────────────────────────────────
+#  BACKEND REGISTRATION
+#  THIS is what makes the frontend show "Agent online"
+# ─────────────────────────────────────────────
+
+def register_with_backend(tunnel_url, retries=5):
+    """Tell the Render backend about the new tunnel URL."""
+    print(f"\nRegistering agent with backend: {BACKEND_URL}")
     
-    for target in targets:
+    for attempt in range(1, retries + 1):
         try:
-            res = requests.post(target, json={'url': url}, timeout=5)
+            res = requests.post(
+                f"{BACKEND_URL}/api/agent/register",
+                json={"url": tunnel_url, "secret": AGENT_SECRET},
+                timeout=10
+            )
             if res.status_code == 200:
-                print(f"✓ Agent registered with backend at {target}")
-        except:
-            pass
+                print(f"✓ Agent registered with backend! (attempt {attempt})")
+                return True
+            else:
+                print(f"  Backend returned {res.status_code}, retrying...")
+        except requests.exceptions.ConnectionError:
+            print(f"  Backend unreachable (attempt {attempt}/{retries}), retrying in 10s...")
+        except Exception as e:
+            print(f"  Registration error: {e}")
+        
+        time.sleep(10)
+    
+    print("✗ Could not register with backend after all attempts.")
+    return False
 
-def check_internet():
-    try:
-        requests.get('https://google.com', timeout=5)
-        return True
-    except:
-        return False
+
+# ─────────────────────────────────────────────
+#  TUNNEL
+# ─────────────────────────────────────────────
 
 def start_tunnel():
     global tunnel_process
-    print("Starting Cloudflare tunnel loop...")
+    print("\nStarting Cloudflare tunnel...")
     
     while True:
-        if not check_internet():
-            print("No internet detected. Waiting 10 seconds before retry...")
-            time.sleep(10)
-            continue
-
-        print("\nConnecting Cloudflare tunnel...")
         tunnel_process = subprocess.Popen(
             ['cloudflared', 'tunnel', '--url', 'http://localhost:5001'],
             stdout=subprocess.PIPE,
@@ -148,46 +188,74 @@ def start_tunnel():
                     if match:
                         tunnel_url = match.group(0)
                         url_found = True
-                        print(f"\n✨ TUNNEL ONLINE: {tunnel_url}")
-                        update_render_url(tunnel_url)
-                        register_agent_direct(tunnel_url)
+                        print(f"\n{'='*50}")
+                        print(f"  ✨ TUNNEL ONLINE: {tunnel_url}")
+                        print(f"{'='*50}\n")
+                        
+                        # Run registrations in background so tunnel keeps reading
+                        def register_all(url=tunnel_url):
+                            update_render_url(url)
+                            register_with_backend(url)
+                            print("\n✅ FRIDAY is fully online!")
+                            print(f"   Open: friday-git-main-parthjumbadkar7-5293s-projects.vercel.app\n")
+                        
+                        threading.Thread(target=register_all, daemon=True).start()
             
-            # If loop finishes, process died
-            print("Tunnel process disconnected. Restarting...")
+            print("\nTunnel disconnected. Restarting in 5s...")
         except Exception as e:
             print(f"Tunnel error: {e}")
         
         if tunnel_process:
             tunnel_process.terminate()
+        
         time.sleep(5)
+        
+        # Re-check internet before restarting
+        if not wait_for_internet(max_wait=60):
+            print("Still no internet. Will keep trying...")
+
+
+# ─────────────────────────────────────────────
+#  SHUTDOWN
+# ─────────────────────────────────────────────
 
 def shutdown(sig=None, frame=None):
-    print("\nShutting down Friday...")
+    print("\nShutting down FRIDAY...")
     if agent_process:
         agent_process.terminate()
     if tunnel_process:
         tunnel_process.terminate()
-    print("Friday stopped. Goodbye!")
+    print("FRIDAY stopped. Goodbye!")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, shutdown)
 
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
+
 if __name__ == '__main__':
     print("=" * 50)
-    print("  FRIDAY - Starting up...")
+    print("  FRIDAY — Starting Up")
+    print("=" * 50)
+    print(f"  Render API Key:  {'✓' if RENDER_API_KEY else '✗ MISSING'}")
+    print(f"  Render Svc ID:   {'✓' if RENDER_SERVICE_ID else '✗ MISSING'}")
+    print(f"  Backend URL:     {BACKEND_URL}")
     print("=" * 50)
 
-    print(f"API Key loaded: {'YES' if RENDER_API_KEY else 'NO - CHECK .env FILE'}")
-    print(f"Service ID loaded: {'YES' if RENDER_SERVICE_ID else 'NO - CHECK .env FILE'}")
+    # Step 1: Wait for internet (handles slow boot)
+    wait_for_internet(max_wait=120)
 
+    # Step 2: Start the agent
     start_agent()
-    time.sleep(3)
 
+    # Step 3: Start the tunnel (loops forever, re-registers on reconnect)
     tunnel_thread = threading.Thread(target=start_tunnel, daemon=True)
     tunnel_thread.start()
 
-    print("\nFriday is starting! Wait for success message...")
-    print("Press Ctrl+C to stop everything.\n")
+    print("\nFRIDAY is starting... Wait for the ✅ message above.\n")
+    print("Press Ctrl+C to stop.\n")
 
     try:
         while True:
