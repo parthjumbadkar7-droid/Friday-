@@ -768,3 +768,45 @@ html, body, #root {
   text-align: center;
 }
 
+/* ─── Action Results (terminal-style) ───────────────────────── */
+.action-results {
+  margin: 4px 12px 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.action-result-line {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #4ade80;
+  background: rgba(0, 255, 100, 0.05);
+  border-left: 2px solid rgba(74, 222, 128, 0.4);
+  padding: 2px 8px;
+  border-radius: 0 4px 4px 0;
+  white-space: pre-wrap;
+}
+
+/* ─── Follow-up Suggestion Chip ─────────────────────────────── */
+.follow-up-chip {
+  display: inline-block;
+  margin: 4px 12px 10px 12px;
+  padding: 6px 14px;
+  background: rgba(124, 58, 237, 0.2);
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  color: #c4b5fd;
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+.follow-up-chip:hover {
+  background: rgba(124, 58, 237, 0.4);
+  border-color: rgba(167, 139, 250, 0.7);
+  color: #ede9fe;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+.follow-up-chip::before {
+  content: '💡 ';
+}

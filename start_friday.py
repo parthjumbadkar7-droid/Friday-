@@ -55,8 +55,9 @@ def wait_for_internet(max_wait=120):
 def start_agent():
     global agent_process
     print("\nStarting FRIDAY agent...")
+    agent_path = os.path.join(AGENT_DIR, 'friday_agent.py')
     agent_process = subprocess.Popen(
-        ['python', 'friday_agent.py'],
+        ['python', agent_path],
         cwd=AGENT_DIR,
         creationflags=subprocess.CREATE_NEW_CONSOLE
     )

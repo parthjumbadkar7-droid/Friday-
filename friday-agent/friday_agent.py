@@ -9,12 +9,26 @@ import time
 import os
 import json
 import sys
+import shutil
+import random
 import ctypes
 import pyautogui
 import webbrowser
 import glob
 import platform
 import requests
+try:
+    import psutil
+except ImportError:
+    psutil = None
+try:
+    import pyttsx3
+except ImportError:
+    pyttsx3 = None
+try:
+    import send2trash
+except ImportError:
+    send2trash = None
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -25,21 +39,46 @@ app = Flask(__name__)
 BACKEND_URL = os.getenv('RENDER_BACKEND_URL', 'https://friday-lwx5.onrender.com')
 AGENT_SECRET = os.getenv('AGENT_SECRET', 'friday-secret-2024')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
-TUNNEL_URL = None  # Updated by start_friday.py when tunnel opens
+TUNNEL_URL = None
+
+MEMORY_FILE = os.path.join(os.path.dirname(__file__), 'friday_memory.json')
+
+# ── TTS Engine ────────────────────────────────────────────────────
+tts_engine = None
+if pyttsx3:
+    try:
+        tts_engine = pyttsx3.init()
+        tts_engine.setProperty('rate', 175)
+        tts_engine.setProperty('volume', 0.9)
+        voices = tts_engine.getProperty('voices')
+        for v in voices:
+            if 'female' in v.name.lower() or 'zira' in v.name.lower():
+                tts_engine.setProperty('voice', v.id)
+                break
+    except Exception:
+        tts_engine = None
+
+def speak(text):
+    if tts_engine and len(text) < 200:
+        threading.Thread(
+            target=lambda: (tts_engine.say(text), tts_engine.runAndWait()),
+            daemon=True
+        ).start()
+
+USERNAME = os.environ.get("USERNAME", "Parth")
 
 # ─────────────────────────────────────────────
 #  APP MAP  (Windows paths + UWP shell IDs)
 # ─────────────────────────────────────────────
 APP_MAP = {
-    # Only keep these — they NEED special handling
-    "whatsapp":      f"C:\\Users\\{USERNAME}\\AppData\\Local\\WhatsApp\\WhatsApp.exe",
-    "spotify":       f"C:\\Users\\{USERNAME}\\AppData\\Roaming\\Spotify\\Spotify.exe",
     "telegram":      r"shell:AppsFolder\TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
     "camera":        r"shell:AppsFolder\Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
-    "settings":      "ms-settings:",
-    "cs2":           "steam://rungameid/730",
-    "counter strike":"steam://rungameid/730",
     "discord":       f"C:\\Users\\{USERNAME}\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe",
+    "vs code":       f"C:\\Users\\{USERNAME}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "vscode":        f"C:\\Users\\{USERNAME}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "git bash":      r"C:\Program Files\Git\git-bash.exe",
+    "vlc":           r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+    "steam":         r"C:\Program Files (x86)\Steam\Steam.exe",
 }
 
 WEBSITE_MAP = {
@@ -56,7 +95,6 @@ WEBSITE_MAP = {
     "chatgpt":   "https://chat.openai.com",
     "claude":    "https://claude.ai",
     "spotify":   "https://open.spotify.com",
-    "whatsapp":  "https://web.whatsapp.com",
     "discord":   "https://discord.com/app",
     "notion":    "https://notion.so",
     "figma":     "https://figma.com",
@@ -65,10 +103,213 @@ WEBSITE_MAP = {
     "supabase":  "https://supabase.com",
 }
 
-USERNAME = os.environ.get("USERNAME", "Parth")
+
 
 def resolve_path(path):
     return path.replace("{user}", USERNAME)
+
+
+# ─────────────────────────────────────────────
+#  MEMORY SYSTEM
+# ─────────────────────────────────────────────
+
+def load_memory():
+    try:
+        with open(MEMORY_FILE, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {"last_session": None, "frequent_apps": {}, "frequent_commands": [], "last_worked_on": "unknown", "notes": []}
+
+def save_memory(mem):
+    try:
+        with open(MEMORY_FILE, 'w') as f:
+            json.dump(mem, f, indent=2)
+    except Exception:
+        pass
+
+def update_memory(app_name=None, command=None):
+    mem = load_memory()
+    mem["last_session"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if app_name:
+        mem["frequent_apps"][app_name] = mem["frequent_apps"].get(app_name, 0) + 1
+    if command:
+        cmds = mem.get("frequent_commands", [])
+        if command not in cmds:
+            cmds.insert(0, command)
+        mem["frequent_commands"] = cmds[:20]
+    save_memory(mem)
+
+def get_memory_context():
+    mem = load_memory()
+    top_apps = sorted(mem.get("frequent_apps", {}).items(), key=lambda x: -x[1])[:3]
+    top_str = ", ".join(a for a, _ in top_apps) if top_apps else "none yet"
+    return f"Parth's frequent apps: {top_str}. Last session: {mem.get('last_session','unknown')}. Last worked on: {mem.get('last_worked_on','unknown')}."
+
+
+# ─────────────────────────────────────────────
+#  FOLLOW-UP SUGGESTIONS (30% proactive)
+# ─────────────────────────────────────────────
+
+FOLLOW_UPS = {
+    "spotify":      "Want me to also search for a specific playlist?",
+    "vs code":      "Should I pull up your last project folder?",
+    "vscode":       "Should I pull up your last project folder?",
+    "youtube":      "Should I close other distracting tabs?",
+    "screenshot":   "Want me to open it in Paint for editing?",
+    "chrome":       "Want me to open a specific site?",
+    "discord":      "Want me to mute notifications for focus time?",
+}
+
+def maybe_follow_up(action_type, app_name=""):
+    if random.random() > 0.3:
+        return None
+    key = app_name.lower() if app_name else action_type
+    return FOLLOW_UPS.get(key, None)
+
+
+# ─────────────────────────────────────────────
+#  SYSTEM EXTRAS
+# ─────────────────────────────────────────────
+
+def check_battery():
+    if not psutil:
+        return "psutil not installed — can't check battery."
+    bat = psutil.battery()
+    if bat is None:
+        return "No battery detected (desktop PC)."
+    status = "charging" if bat.power_plugged else "on battery"
+    return f"✓ Battery: {bat.percent:.0f}% — {status}"
+
+def get_current_time():
+    return f"✓ Current time: {time.strftime('%I:%M %p, %A %d %B %Y')}"
+
+def minimize_all():
+    pyautogui.hotkey('win', 'd')
+    return "✓ Minimized all windows"
+
+def browser_control(action):
+    action = action.lower().strip()
+    if action == "new tab":
+        pyautogui.hotkey('ctrl', 't')
+    elif action == "close tab":
+        pyautogui.hotkey('ctrl', 'w')
+    elif action == "go back":
+        pyautogui.hotkey('alt', 'left')
+    elif action == "zoom in":
+        pyautogui.hotkey('ctrl', '+')
+    elif action == "zoom out":
+        pyautogui.hotkey('ctrl', '-')
+    elif action == "scroll down":
+        pyautogui.scroll(-500)
+    elif action == "scroll up":
+        pyautogui.scroll(500)
+    elif action == "refresh":
+        pyautogui.press('f5')
+    elif action == "incognito":
+        pyautogui.hotkey('ctrl', 'shift', 'n')
+    elif action == "copy":
+        pyautogui.hotkey('ctrl', 'c')
+    elif action == "paste":
+        pyautogui.hotkey('ctrl', 'v')
+    elif action == "select all":
+        pyautogui.hotkey('ctrl', 'a')
+    else:
+        return f"✗ Unknown browser action: {action}"
+    return f"✓ Browser: {action}"
+
+def open_in_new_tab(url_or_name):
+    from urllib.parse import quote as urlquote
+    pyautogui.hotkey('ctrl', 't')
+    time.sleep(0.5)
+    if url_or_name.startswith("http"):
+        url = url_or_name
+    elif url_or_name in WEBSITE_MAP:
+        url = WEBSITE_MAP[url_or_name]
+    else:
+        url = f"https://{url_or_name}"
+    pyautogui.write(url, interval=0.03)
+    pyautogui.press('enter')
+    return f"✓ Opened {url} in new tab"
+
+def find_file(filename):
+    search_paths = [
+        os.path.expanduser("~/Desktop"),
+        os.path.expanduser("~/Documents"),
+        os.path.expanduser("~/Downloads"),
+        os.path.expanduser("~/Pictures"),
+    ]
+    for sp in search_paths:
+        matches = glob.glob(os.path.join(sp, "**", f"*{filename}*"), recursive=True)
+        if matches:
+            return matches[0]
+    return None
+
+def open_special_folder(name):
+    folders = {
+        "downloads": os.path.expanduser("~/Downloads"),
+        "desktop":   os.path.expanduser("~/Desktop"),
+        "documents": os.path.expanduser("~/Documents"),
+        "pictures":  os.path.expanduser("~/Pictures"),
+        "music":     os.path.expanduser("~/Music"),
+    }
+    path = folders.get(name.lower())
+    if path:
+        os.startfile(path)
+        return f"✓ Opened {name} folder"
+    return f"✗ Unknown folder: {name}"
+
+def delete_file_safe(filename):
+    path = find_file(filename)
+    if path:
+        if send2trash:
+            send2trash.send2trash(path)
+            return f"✓ Moved to Recycle Bin: {path}"
+        os.remove(path)
+        return f"✓ Deleted: {path}"
+    return f"✗ File not found: {filename}"
+
+def create_folder(name, location="desktop"):
+    base = os.path.expanduser("~/Desktop") if location == "desktop" else os.path.expanduser(f"~/{location}")
+    path = os.path.join(base, name)
+    os.makedirs(path, exist_ok=True)
+    return f"✓ Created folder: {path}"
+
+def spotify_control(action):
+    action = action.lower().strip()
+    if action in ("pause", "play", "toggle"):
+        pyautogui.press('playpause')
+    elif action in ("next", "next song"):
+        pyautogui.press('nexttrack')
+    elif action in ("previous", "prev", "previous song"):
+        pyautogui.press('prevtrack')
+    else:
+        return f"✗ Unknown Spotify action: {action}"
+    return f"✓ Spotify: {action}"
+
+def play_on_spotify(query):
+    open_app("spotify")
+    time.sleep(2.5)
+    pyautogui.hotkey('ctrl', 'l')
+    time.sleep(0.3)
+    pyautogui.write(query, interval=0.03)
+    pyautogui.press('enter')
+    return f"✓ Searched Spotify for: {query}"
+
+def send_whatsapp_contact(contact, message):
+    """Open WhatsApp desktop and send message to contact using Ctrl+F search."""
+    open_app("whatsapp")
+    time.sleep(3)
+    pyautogui.hotkey('ctrl', 'f')
+    time.sleep(0.5)
+    pyautogui.write(contact, interval=0.04)
+    time.sleep(1)
+    pyautogui.press('enter')
+    time.sleep(1)
+    pyautogui.write(message, interval=0.03)
+    pyautogui.press('enter')
+    return f"✓ Message sent to {contact}"
+
+
 
 
 # ─────────────────────────────────────────────
@@ -78,14 +319,28 @@ def resolve_path(path):
 def open_app(app_name):
     name = app_name.lower().strip()
     
-    # Method 1: Check APP_MAP first (for known UWP/special apps)
+    # Special cases first
+    if name in ("whatsapp",):
+        subprocess.run('start whatsapp:', shell=True)
+        return f"✓ Opened {app_name}"
+    
+    if name in ("spotify",):
+        subprocess.Popen(["explorer.exe", r"shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"])
+        return f"✓ Opened {app_name}"
+    
+    if name in ("cs2", "counter strike", "counter-strike"):
+        webbrowser.open("steam://rungameid/730")
+        return f"✓ Launching CS2 via Steam"
+    
+    if name in ("settings",):
+        subprocess.Popen(["explorer.exe", "ms-settings:"])
+        return f"✓ Opened Settings"
+
+    # Method 1: Check APP_MAP for known paths
     if name in APP_MAP:
         target = resolve_path(APP_MAP[name])
         if target.startswith("shell:") or target.startswith("ms-"):
-            try:
-                os.startfile(target)
-            except Exception:
-                subprocess.Popen(f'explorer "{target}"', shell=True)
+            subprocess.Popen(["explorer.exe", target])
             return f"✓ Opened {app_name}"
         if target.startswith("steam://"):
             webbrowser.open(target)
@@ -95,41 +350,31 @@ def open_app(app_name):
             subprocess.Popen(target, shell=True)
             return f"✓ Opened {app_name}"
 
-    # Method 2: Try Windows START command (works for most installed apps)
-    try:
-        subprocess.Popen(f'start "" "{app_name}"', shell=True)
-        time.sleep(1)
+    # Method 2: Windows START command (works for most installed apps by name)
+    result = subprocess.run(f'start "" "{app_name}"', shell=True, capture_output=True)
+    if result.returncode == 0:
         return f"✓ Opened {app_name}"
-    except Exception:
-        pass
 
-    # Method 3: Search for exe in common install locations
+    # Method 3: Search Program Files and AppData for matching exe
     search_dirs = [
         r"C:\Program Files",
         r"C:\Program Files (x86)",
-        f"C:\\Users\\{USERNAME}\\AppData\\Local",
-        f"C:\\Users\\{USERNAME}\\AppData\\Roaming",
+        os.path.expanduser(r"~\AppData\Local"),
+        os.path.expanduser(r"~\AppData\Roaming"),
     ]
     for d in search_dirs:
         try:
-            matches = glob.glob(os.path.join(d, "**", f"{app_name}*.exe"), recursive=True)
+            matches = glob.glob(os.path.join(d, "**", f"{name}*.exe"), recursive=True)
             if matches:
-                subprocess.Popen(f'"{matches[0]}"', shell=True)
+                subprocess.Popen(matches[0], shell=True)
                 return f"✓ Found and opened {app_name}"
         except Exception:
             continue
 
-    # Method 4: Try Windows Search via shell
-    try:
-        subprocess.Popen(f'explorer shell:AppsFolder', shell=True)
-        time.sleep(0.5)
-        subprocess.Popen(f'start "" "{app_name}"', shell=True)
-        return f"✓ Attempted to open {app_name}"
-    except Exception:
-        pass
-
-    # Method 5: Ask user for exact name
-    return f"✗ Could not find {app_name}. Try saying the exact app name."
+    # Method 4: PowerShell fuzzy search
+    ps_cmd = f'powershell -command "Get-StartApps | Where-Object {{{{$_.Name -like \'*{name}*\'}}}} | Select-Object -First 1 | ForEach-Object {{{{ Start-Process $_.AppID }}}}"'
+    subprocess.run(ps_cmd, shell=True)
+    return f"✓ Attempted to open {app_name}"
 
 
 def open_website(url_or_name):
@@ -251,6 +496,45 @@ def download_file(url, dest_folder=None):
         return f"✗ Download failed: {e}"
 
 
+def close_app(app_name):
+    name = app_name.lower().strip()
+    
+    PROCESS_MAP = {
+        "whatsapp": ["WhatsApp.exe", "whatsapp.exe"],
+        "spotify": ["Spotify.exe"],
+        "chrome": ["chrome.exe"],
+        "firefox": ["firefox.exe"],
+        "edge": ["msedge.exe"],
+        "discord": ["Discord.exe"],
+        "telegram": ["Telegram.exe"],
+        "vs code": ["Code.exe"],
+        "vscode": ["Code.exe"],
+        "notepad": ["notepad.exe"],
+        "vlc": ["vlc.exe"],
+        "steam": ["steam.exe"],
+        "youtube": ["chrome.exe"],
+    }
+    
+    processes = PROCESS_MAP.get(name, [f"{name}.exe"])
+    killed = False
+    
+    for process in processes:
+        result = subprocess.run(
+            f'taskkill /F /IM "{process}" /T',
+            shell=True, capture_output=True, text=True
+        )
+        if "SUCCESS" in result.stdout or result.returncode == 0:
+            killed = True
+    
+    if killed:
+        return f"✓ Closed {app_name}"
+    
+    # Last resort: use PowerShell to find and kill by window title
+    ps_cmd = f'powershell -command "Get-Process | Where-Object {{$_.MainWindowTitle -like \'*{name}*\'}} | Stop-Process -Force"'
+    subprocess.run(ps_cmd, shell=True)
+    return f"✓ Attempted to close {app_name}"
+
+
 def send_whatsapp_message(contact, message):
     """Open WhatsApp web with a pre-filled message to a contact."""
     encoded = requests.utils.quote(message)
@@ -266,8 +550,11 @@ def send_whatsapp_message(contact, message):
 #  AGENTIC AI LOOP  (Groq decides what to do)
 # ─────────────────────────────────────────────
 
-SYSTEM_PROMPT = f"""You are FRIDAY, a personal AI assistant running on Parth's laptop.
+def build_system_prompt():
+    mem_ctx = get_memory_context()
+    return f"""You are FRIDAY, a personal AI assistant running on Parth's laptop.
 You can control Parth's computer by outputting JSON commands.
+{mem_ctx}
 
 Your response MUST always be valid JSON with this structure:
 {{
@@ -277,23 +564,33 @@ Your response MUST always be valid JSON with this structure:
   ]
 }}
 
-Available action types and their params:
+Available action types:
 - open_app:       {{"app": "spotify"}}
+- close_app:      {{"app": "whatsapp"}}
 - open_website:   {{"url": "youtube"}}
+- new_tab:        {{"url": "github.com"}}
+- browser:        {{"action": "new tab|close tab|go back|refresh|scroll down|scroll up|zoom in|zoom out|incognito|copy|paste|select all"}}
 - search_web:     {{"query": "python tutorials"}}
 - open_file:      {{"path": "~/Desktop/report.pdf"}}
+- open_folder:    {{"name": "downloads|desktop|documents"}}
+- find_file:      {{"name": "report.pdf"}}
+- delete_file:    {{"name": "old_file.txt"}}
+- create_folder:  {{"name": "MyProject", "location": "desktop"}}
 - screenshot:     {{}}
-- system:         {{"action": "lock|shutdown|restart|sleep|volume up|volume down|mute"}}
-- shell:          {{"cmd": "dir C:\\"}}
+- system:         {{"action": "lock|shutdown|restart|sleep|volume up|volume down|mute|minimize all|battery|time"}}
+- spotify:        {{"action": "pause|next|previous"}}
+- play_spotify:   {{"query": "lo-fi hip hop"}}
+- shell:          {{"cmd": "dir C:\\\\"}}
 - type_send:      {{"message": "Hello!"}}
 - download:       {{"url": "https://...", "folder": "~/Downloads"}}
-- whatsapp:       {{"contact": "+919999999999", "message": "Hey!"}}
+- whatsapp_msg:   {{"contact": "Parth", "message": "Hey!"}}
+- wait:           {{"seconds": 2}}
 
 Rules:
 - Always respond in JSON. Never plain text.
 - If nothing to do, actions = []
-- Chain multiple actions for complex tasks
-- Be proactive: if user says "play music", open Spotify AND search for the song
+- Chain multiple actions for complex tasks with wait between steps
+- Be proactive: if user says "play music", open Spotify AND play_spotify
 - User is Parth, a hardware engineering student in Amravati, India.
 """
 
@@ -303,7 +600,7 @@ def ask_groq(user_message, conversation_history=None):
     
     messages = []
     if conversation_history:
-        messages.extend(conversation_history[-6:])  # last 3 turns
+        messages.extend(conversation_history[-6:])
     messages.append({"role": "user", "content": user_message})
     
     try:
@@ -315,7 +612,7 @@ def ask_groq(user_message, conversation_history=None):
             },
             json={
                 "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+                "messages": [{"role": "system", "content": build_system_prompt()}] + messages,
                 "temperature": 0.4,
                 "max_tokens": 1024,
             },
@@ -333,39 +630,115 @@ def ask_groq(user_message, conversation_history=None):
         return {"reply": f"AI error: {e}", "actions": []}
 
 
-def execute_actions(actions):
+def execute_actions(actions, user_message=""):
     results = []
-    for action in actions:
+    follow_up = None
+
+    for i, action in enumerate(actions):
         action_type = action.get("type")
         params = action.get("params", {})
-        
+
+        # Sequential delay between chained actions
+        if i > 0:
+            time.sleep(1)
+
         try:
-            if action_type == "open_app":
-                results.append(open_app(params.get("app", "")))
+            if action_type == "wait":
+                time.sleep(float(params.get("seconds", 1)))
+                results.append(f"✓ Waited {params.get('seconds', 1)}s")
+
+            elif action_type == "open_app":
+                app = params.get("app", "")
+                r = open_app(app)
+                results.append(r)
+                update_memory(app_name=app, command=user_message)
+                if not follow_up:
+                    follow_up = maybe_follow_up("open_app", app)
+
+            elif action_type == "close_app":
+                results.append(close_app(params.get("app", "")))
+
             elif action_type == "open_website":
                 results.append(open_website(params.get("url", "")))
+                update_memory(command=user_message)
+
+            elif action_type == "new_tab":
+                results.append(open_in_new_tab(params.get("url", "")))
+
+            elif action_type == "browser":
+                results.append(browser_control(params.get("action", "")))
+
             elif action_type == "search_web":
                 results.append(search_web(params.get("query", "")))
+
             elif action_type == "open_file":
                 results.append(open_file_or_folder(params.get("path", "")))
+
+            elif action_type == "open_folder":
+                results.append(open_special_folder(params.get("name", "")))
+
+            elif action_type == "find_file":
+                path = find_file(params.get("name", ""))
+                if path:
+                    os.startfile(path)
+                    results.append(f"✓ Opened: {path}")
+                else:
+                    results.append(f"✗ File not found: {params.get('name', '')}")
+
+            elif action_type == "delete_file":
+                results.append(delete_file_safe(params.get("name", "")))
+
+            elif action_type == "create_folder":
+                results.append(create_folder(params.get("name", ""), params.get("location", "desktop")))
+
             elif action_type == "screenshot":
-                results.append(take_screenshot())
+                r = take_screenshot()
+                results.append(r)
+                if not follow_up:
+                    follow_up = maybe_follow_up("screenshot")
+
             elif action_type == "system":
-                results.append(system_control(params.get("action", "")))
+                act = params.get("action", "")
+                if act == "battery":
+                    results.append(check_battery())
+                elif act == "time":
+                    results.append(get_current_time())
+                elif act == "minimize all":
+                    results.append(minimize_all())
+                else:
+                    results.append(system_control(act))
+
+            elif action_type == "spotify":
+                results.append(spotify_control(params.get("action", "")))
+
+            elif action_type == "play_spotify":
+                results.append(play_on_spotify(params.get("query", "")))
+                update_memory(app_name="spotify", command=user_message)
+                if not follow_up:
+                    follow_up = maybe_follow_up("open_app", "spotify")
+
             elif action_type == "shell":
                 results.append(run_shell_command(params.get("cmd", "")))
+
             elif action_type == "type_send":
                 results.append(type_and_send("", params.get("message", "")))
+
             elif action_type == "download":
                 results.append(download_file(params.get("url", ""), params.get("folder")))
+
             elif action_type == "whatsapp":
                 results.append(send_whatsapp_message(params.get("contact", ""), params.get("message", "")))
+
+            elif action_type == "whatsapp_msg":
+                results.append(send_whatsapp_contact(params.get("contact", ""), params.get("message", "")))
+
             else:
                 results.append(f"✗ Unknown action: {action_type}")
+
         except Exception as e:
             results.append(f"✗ Action failed ({action_type}): {e}")
-    
-    return results
+
+    return results, follow_up
 
 
 # ─────────────────────────────────────────────
@@ -396,12 +769,16 @@ def handle_command():
     actions = ai_response.get("actions", [])
     
     # Execute the actions
-    action_results = execute_actions(actions)
+    action_results, follow_up = execute_actions(actions, user_message)
+    
+    # Speak the reply on laptop
+    speak(ai_response.get("reply", ""))
     
     return jsonify({
         "reply": ai_response.get("reply", "Done!"),
         "actions": actions,
         "results": action_results,
+        "follow_up": follow_up,
         "status": "ok"
     })
 
@@ -416,8 +793,33 @@ def execute_direct():
         return jsonify({"error": "Unauthorized"}), 401
     
     actions = data.get("actions", [])
-    results = execute_actions(actions)
+    results, _ = execute_actions(actions)
     return jsonify({"results": results, "status": "ok"})
+
+
+@app.route('/api/memory', methods=['GET'])
+def get_memory():
+    return jsonify(load_memory())
+
+
+@app.route('/api/memory/note', methods=['POST'])
+def add_note():
+    data = request.json or {}
+    note = data.get("note", "")
+    if note:
+        mem = load_memory()
+        mem.setdefault("notes", []).append({"text": note, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        save_memory(mem)
+    return jsonify({"ok": True})
+
+
+@app.route('/api/speak', methods=['POST'])
+def speak_route():
+    data = request.json or {}
+    text = data.get("text", "")
+    if text:
+        speak(text)
+    return jsonify({"ok": True})
 
 
 @app.route('/api/set-url', methods=['POST'])

@@ -56,6 +56,7 @@ function useLiveStats() {
 
 export default function LeftPanel({ onPromptClick, messageCount, history, onHistoryClick, onNewChat, onDeleteHistory }) {
   const [agentStatus, setAgentStatus] = useState('offline');
+  const [lastSeen, setLastSeen] = useState(null);
   
   useEffect(() => {
     const checkStatus = async () => {
@@ -63,6 +64,7 @@ export default function LeftPanel({ onPromptClick, messageCount, history, onHist
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/status`);
         const data = await res.json();
         setAgentStatus(data.status);
+        if (data.lastSeen) setLastSeen(data.lastSeen);
       } catch {
         setAgentStatus('offline');
       }
@@ -97,7 +99,12 @@ export default function LeftPanel({ onPromptClick, messageCount, history, onHist
             <div className="profile-name">Parth</div>
             <div className="profile-role">Hardware Eng. Student · Amravati</div>
             <div className="profile-status">
-              <span className={`status-dot ${agentStatus === 'online' ? 'status-online' : 'status-offline'}`} />
+              <span
+                className={`status-dot ${agentStatus === 'online' ? 'status-online' : 'status-offline'}`}
+                title={agentStatus === 'online'
+                  ? `FRIDAY is active — last seen ${lastSeen ? new Date(lastSeen).toLocaleTimeString() : 'just now'}`
+                  : 'FRIDAY is offline — run start_friday.py on your laptop'}
+              />
               <span className="status-text">{agentStatus === 'online' ? 'FRIDAY is online' : 'Agent offline'}</span>
             </div>
           </div>

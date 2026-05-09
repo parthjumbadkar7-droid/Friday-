@@ -5,6 +5,37 @@ import VoiceButton from './VoiceButton';
 import ToolIndicator from './ToolIndicator';
 import { sendMessage, fetchWeather, fetchSearch, executeCommand } from '../utils/api';
 
+// ── Startup Greeting ──────────────────────────────────────────────
+async function buildGreeting() {
+  const now = new Date();
+  const h = now.getHours();
+  const period = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const day = days[now.getDay()];
+
+  let weatherLine = '';
+  try {
+    const wr = await fetch(
+      'https://api.open-meteo.com/v1/forecast?latitude=20.93&longitude=77.75&current_weather=true'
+    );
+    const wj = await wr.json();
+    const temp = wj?.current_weather?.temperature;
+    const code = wj?.current_weather?.weathercode;
+    const desc = code <= 1 ? 'clear skies' : code <= 3 ? 'partly cloudy' : code <= 67 ? 'rain' : 'overcast';
+    if (temp !== undefined) weatherLine = ` It's ${temp}°C with ${desc} in Amravati.`;
+  } catch { /* skip weather silently */ }
+
+  const greetings = [
+    `Good ${period}, Parth! Happy ${day}.${weatherLine} What are we building today?`,
+    `Hey Parth — ${day} ${period}.${weatherLine} I'm ready when you are. What's the mission?`,
+    `Good ${period}!${weatherLine} It's ${day} — what's on the agenda?`,
+    `${day} ${period}, Parth.${weatherLine} Systems online. What do you need?`,
+    `Good ${period}, Parth.${weatherLine} Another ${day}, another chance to build something great. Where do we start?`,
+    `Hey — glad you're here.${weatherLine} It's ${day} ${period}. What are we working on?`,
+  ];
+  return greetings[Math.floor(Math.random() * greetings.length)];
+}
+
 // Detect if message implies a tool call
 function detectToolIntent(text) {
   const lower = text.toLowerCase();
@@ -39,8 +70,22 @@ export default function ChatCard({
 }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [actionResults, setActionResults] = useState([]);
+  const [followUp, setFollowUp] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Auto-greeting on first load
+  useEffect(() => {
+    if (messages.length > 0) return;
+    const timer = setTimeout(async () => {
+      const greeting = await buildGreeting();
+      const greetMsg = { role: 'assistant', content: greeting, timestamp: new Date().toISOString() };
+      setMessages(prev => prev.length === 0 ? [greetMsg] : prev);
+      speak(greeting);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync voice transcript → input field
   useEffect(() => {
@@ -156,8 +201,16 @@ export default function ChatCard({
       if (!res.ok) throw new Error('Backend error');
       const data = await res.json();
       const reply = data.reply || "Done!";
-      
-      const fridayMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
+      const results = data.results || [];
+      const fu = data.follow_up || null;
+
+      const fridayMsg = {
+        role: 'assistant',
+        content: reply,
+        timestamp: new Date().toISOString(),
+        actionResults: results,
+        followUp: fu,
+      };
       setMessages((prev) => [...prev, fridayMsg]);
       speak(reply);
     } catch (err) {
@@ -190,7 +243,24 @@ export default function ChatCard({
           </div>
         )}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} onEdit={onEditMessage} />
+          <div key={i}>
+            <MessageBubble message={msg} onEdit={onEditMessage} />
+            {msg.actionResults && msg.actionResults.length > 0 && (
+              <div className="action-results">
+                {msg.actionResults.map((r, ri) => (
+                  <div key={ri} className="action-result-line">› {r}</div>
+                ))}
+              </div>
+            )}
+            {msg.followUp && (
+              <button
+                className="follow-up-chip"
+                onClick={() => setExternalPrompt ? setExternalPrompt(msg.followUp) : null}
+              >
+                {msg.followUp}
+              </button>
+            )}
+          </div>
         ))}
 
         {/* Tool indicator appears before FRIDAY's reply */}
