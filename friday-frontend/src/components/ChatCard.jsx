@@ -200,9 +200,9 @@ export default function ChatCard({
 
       if (!res.ok) throw new Error('Backend error');
       const data = await res.json();
-      let reply = data.reply || "Done!";
+      let reply = data.reply || data.message || "Done!";
 
-      // If reply looks like raw JSON, extract just the reply field
+      // Strip any raw JSON that leaked into reply
       if (typeof reply === 'string' && reply.trim().startsWith('{')) {
         try {
           const parsed = JSON.parse(reply);
