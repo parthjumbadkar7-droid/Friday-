@@ -773,6 +773,13 @@ def handle_command():
     
     # Let Groq decide what to do
     ai_response = ask_groq(user_message, history)
+    
+    if isinstance(ai_response, str):
+        try:
+            ai_response = json.loads(ai_response)
+        except:
+            ai_response = {"reply": ai_response, "actions": []}
+            
     actions = ai_response.get("actions", [])
     
     # Execute the actions
