@@ -1,7 +1,13 @@
 {
-  "last_session": null,
-  "frequent_apps": {},
-  "frequent_commands": [],
+  "last_session": "2026-05-10T02:09:36",
+  "frequent_apps": {
+    "whatsapp": 1,
+    "spotify": 2
+  },
+  "frequent_commands": [
+    "open spotify",
+    "open WhatsApp"
+  ],
   "last_worked_on": "unknown",
   "user_patterns": {
     "morning": "usually opens Chrome and VS Code",

@@ -325,7 +325,7 @@ def open_app(app_name):
         return f"✓ Opened {app_name}"
     
     if name in ("spotify",):
-        subprocess.Popen(["explorer.exe", r"shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"])
+        subprocess.run('start spotify:', shell=True)
         return f"✓ Opened {app_name}"
     
     if name in ("cs2", "counter strike", "counter-strike"):
@@ -621,7 +621,14 @@ def ask_groq(user_message, conversation_history=None):
         content = res.json()["choices"][0]["message"]["content"]
         
         # Strip markdown fences if present
-        content = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
         return json.loads(content)
     
     except json.JSONDecodeError:
