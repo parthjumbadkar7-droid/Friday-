@@ -592,6 +592,21 @@ Rules:
 - Chain multiple actions for complex tasks with wait between steps
 - Be proactive: if user says "play music", open Spotify AND play_spotify
 - User is Parth, a hardware engineering student in Amravati, India.
+
+INTENT MAPPING — understand what the user really means:
+- "play something" / "play music" / "put on some music" → open_app spotify
+- "I'm bored" → open_app spotify OR suggest something
+- "let's game" / "gaming time" → open_app cs2 or steam  
+- "browse" / "surf the web" → open_app chrome
+- "message [name]" / "text [name]" → open_app whatsapp
+- "watch something" / "netflix time" → open_website netflix
+- "code" / "let's code" / "work time" → open_app vscode
+- "shut it down" / "I'm done" / "goodnight" → system shutdown
+- "quiet" / "silence" → system mute
+- "too loud" → system volume down
+- "turn it up" → system volume up
+
+Always interpret intent, never be too literal. If someone says "play something" they want music.
 """
 
 def ask_groq(user_message, conversation_history=None):

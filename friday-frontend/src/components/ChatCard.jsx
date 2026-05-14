@@ -203,10 +203,10 @@ export default function ChatCard({
       let reply = data.reply || data.message || "Done!";
 
       // Strip any raw JSON that leaked into reply
-      if (typeof reply === 'string' && reply.trim().startsWith('{')) {
+      if (typeof reply === 'string' && reply.includes('"actions"')) {
         try {
-          const parsed = JSON.parse(reply);
-          reply = parsed.reply || "Done!";
+          const inner = JSON.parse(reply);
+          reply = inner.reply || reply;
         } catch {}
       }
 
