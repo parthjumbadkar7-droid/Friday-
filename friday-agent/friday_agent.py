@@ -629,7 +629,17 @@ def ask_groq(user_message, conversation_history=None):
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
-        return json.loads(content)
+        
+        parsed = json.loads(content)
+        
+        # If reply is a dict, extract text
+        reply_val = parsed.get("reply")
+        if isinstance(reply_val, dict):
+            parsed["reply"] = reply_val.get("reply", reply_val.get("text", str(reply_val)))
+        elif not isinstance(reply_val, str):
+            parsed["reply"] = str(reply_val)
+            
+        return parsed
     
     except json.JSONDecodeError:
         return {"reply": content, "actions": []}
@@ -781,15 +791,19 @@ def handle_command():
             ai_response = {"reply": ai_response, "actions": []}
             
     actions = ai_response.get("actions", [])
+    reply = ai_response.get("reply", "Done!")
     
+    if not isinstance(reply, str):
+        reply = str(reply)
+        
     # Execute the actions
     action_results, follow_up = execute_actions(actions, user_message)
     
     # Speak the reply on laptop
-    speak(ai_response.get("reply", ""))
+    speak(reply)
     
     return jsonify({
-        "reply": ai_response.get("reply", "Done!"),
+        "reply": reply,
         "actions": actions,
         "results": action_results,
         "follow_up": follow_up,
