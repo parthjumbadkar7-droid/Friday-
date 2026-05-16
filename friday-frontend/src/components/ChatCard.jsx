@@ -201,13 +201,8 @@ export default function ChatCard({
       if (!res.ok) throw new Error('Backend error');
       const data = await res.json();
       let reply = data.reply || data.message || "Done!";
-
-      // Strip any raw JSON that leaked into reply
-      if (typeof reply === 'string' && reply.includes('"actions"')) {
-        try {
-          const inner = JSON.parse(reply);
-          reply = inner.reply || reply;
-        } catch {}
+      if (typeof reply === 'string' && reply.trim().startsWith('{')) {
+        try { reply = JSON.parse(reply).reply || reply; } catch {}
       }
 
       const results = data.results || [];
